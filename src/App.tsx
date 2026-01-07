@@ -24,6 +24,51 @@ const BASE_HEIGHT = 60;
 const RESULTS_HEIGHT = 300;
 const SETTINGS_HEIGHT = 250;
 
+// Safe calculator function that evaluates basic math expressions
+function evaluateExpression(expr: string): string | null {
+  // Remove all spaces
+  const cleaned = expr.replace(/\s/g, "");
+
+  // Check if it looks like a math expression (must contain at least one operator)
+  if (!/^[\d.]+[+\-*/^][\d.+\-*/^()]+$/.test(cleaned) && !/^\(.*\)$/.test(cleaned)) {
+    // Also check for expressions starting with negative numbers or parentheses
+    if (!/^-?[\d.]+[+\-*/^]/.test(cleaned) && !/^\(/.test(cleaned)) {
+      return null;
+    }
+  }
+
+  // Only allow safe characters: digits, operators, parentheses, decimal point
+  if (!/^[\d+\-*/^().]+$/.test(cleaned)) {
+    return null;
+  }
+
+  try {
+    // Replace ^ with ** for exponentiation
+    const withPower = cleaned.replace(/\^/g, "**");
+
+    // Use Function constructor for safer evaluation (still sandboxed to math)
+    // This is safer than eval() as it doesn't have access to local scope
+    const result = new Function(`"use strict"; return (${withPower})`)();
+
+    // Check if result is a valid number
+    if (typeof result !== "number" || !isFinite(result)) {
+      return null;
+    }
+
+    // Format the result (limit decimal places, add thousand separators with dots)
+    const rounded = Number.isInteger(result)
+      ? result
+      : parseFloat(result.toFixed(10));
+
+    // Format with dots as thousand separators
+    const formatted = rounded.toLocaleString('de-DE');
+
+    return formatted;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const [query, setQuery] = useState("");
   const [filteredTools, setFilteredTools] = useState<Tool[]>([]);
@@ -217,6 +262,7 @@ function App() {
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
   const showResults = query.length > 0 && !showSettings;
+  const calculatorResult = query ? evaluateExpression(query) : null;
 
   return (
     <div className="p-2">
@@ -248,13 +294,21 @@ function App() {
             onKeyDown={handleKeyDown}
             placeholder={status || "Search for tools..."}
             readOnly={showSettings}
-            className={`flex-1 bg-transparent text-base outline-none ${
+            className={`bg-transparent text-base outline-none ${
+              calculatorResult ? "" : "flex-1"
+            } ${
               status
                 ? "text-buncha-accent placeholder-buncha-accent"
                 : "text-buncha-text placeholder-buncha-text-muted"
             } ${showSettings ? "cursor-default" : ""}`}
+            style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
             autoFocus
           />
+          {calculatorResult && (
+            <span className="text-buncha-text-muted text-base whitespace-nowrap flex-1 ml-1">
+              = {calculatorResult}
+            </span>
+          )}
           {(query || showSettings) && (
             <button
               onClick={() => {
