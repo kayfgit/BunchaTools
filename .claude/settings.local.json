@@ -6,7 +6,8 @@
       "Bash(npm init -y)",
       "Bash(npm install:*)",
       "Bash(npx tauri init:*)",
-      "Bash(npm run tauri:*)"
+      "Bash(npm run tauri:*)",
+      "Bash(cargo check:*)"
     ]
   }
 }

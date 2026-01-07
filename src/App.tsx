@@ -10,18 +10,34 @@ interface Tool {
   description: string;
   icon: string;
   keywords: string[];
-  action: () => Promise<void>;
+  action?: () => Promise<void>;
+  isSettings?: boolean;
+}
+
+interface Settings {
+  hotkey_modifiers: string[];
+  hotkey_key: string;
+  launch_at_startup: boolean;
 }
 
 const BASE_HEIGHT = 60;
 const RESULTS_HEIGHT = 300;
+const SETTINGS_HEIGHT = 250;
 
 function App() {
   const [query, setQuery] = useState("");
   const [filteredTools, setFilteredTools] = useState<Tool[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<Settings>({
+    hotkey_modifiers: ["Alt"],
+    hotkey_key: "Q",
+    launch_at_startup: false,
+  });
+  const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hotkeyInputRef = useRef<HTMLDivElement>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -44,18 +60,38 @@ function App() {
         }
       },
     },
+    {
+      id: "settings",
+      name: "Settings",
+      description: "Configure BunchaTools preferences",
+      icon: "⚙️",
+      keywords: ["settings", "preferences", "config", "options", "hotkey", "startup"],
+      isSettings: true,
+    },
   ];
 
+  // Load settings on mount
   useEffect(() => {
-    // Listen for focus-search event from backend
+    const loadSettings = async () => {
+      try {
+        const s = await invoke<Settings>("get_settings");
+        setSettings(s);
+      } catch (e) {
+        console.error("Failed to load settings:", e);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen("focus-search", () => {
       setQuery("");
       setSelectedIndex(0);
       setStatus(null);
+      setShowSettings(false);
       inputRef.current?.focus();
     });
 
-    // Initial focus
     inputRef.current?.focus();
 
     return () => {
@@ -80,47 +116,114 @@ function App() {
     }
   }, [query]);
 
-  // Resize window based on whether results are shown
+  // Resize window based on view
   useEffect(() => {
     const resizeWindow = async () => {
       const appWindow = getCurrentWindow();
-      const showResults = query.length > 0;
-      const newHeight = showResults ? RESULTS_HEIGHT : BASE_HEIGHT;
+      let newHeight = BASE_HEIGHT;
+
+      if (showSettings) {
+        newHeight = SETTINGS_HEIGHT;
+      } else if (query.length > 0) {
+        newHeight = RESULTS_HEIGHT;
+      }
+
       await appWindow.setSize(new LogicalSize(600, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0]);
+  }, [query.length > 0, showSettings]);
 
   const executeTool = async (tool: Tool) => {
-    setQuery("");
-    await tool.action();
+    if (tool.isSettings) {
+      setShowSettings(true);
+      setQuery("");
+    } else if (tool.action) {
+      setQuery("");
+      await tool.action();
+    }
   };
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
-      invoke("hide_window");
-      setQuery("");
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedIndex((prev) =>
-        prev < filteredTools.length - 1 ? prev + 1 : prev
-      );
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
-    } else if (e.key === "Enter" && filteredTools.length > 0) {
-      e.preventDefault();
-      await executeTool(filteredTools[selectedIndex]);
+      if (showSettings) {
+        setShowSettings(false);
+      } else {
+        invoke("hide_window");
+        setQuery("");
+      }
+    } else if (!showSettings) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < filteredTools.length - 1 ? prev + 1 : prev
+        );
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+      } else if (e.key === "Enter" && filteredTools.length > 0) {
+        e.preventDefault();
+        await executeTool(filteredTools[selectedIndex]);
+      }
     }
   };
 
-  const showResults = query.length > 0;
+  const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+
+    if (e.key === "Escape") {
+      setIsRecordingHotkey(false);
+      return;
+    }
+
+    const modifiers: string[] = [];
+    if (e.altKey) modifiers.push("Alt");
+    if (e.ctrlKey) modifiers.push("Ctrl");
+    if (e.shiftKey) modifiers.push("Shift");
+    if (e.metaKey) modifiers.push("Win");
+
+    // Get the actual key (not modifier keys)
+    const key = e.key.toUpperCase();
+    if (["CONTROL", "ALT", "SHIFT", "META"].includes(key)) {
+      return; // Wait for actual key
+    }
+
+    // Map special keys
+    let mappedKey = key;
+    if (key === " ") mappedKey = "Space";
+    else if (key.length === 1) mappedKey = key;
+    else if (key.startsWith("F") && key.length <= 3) mappedKey = key;
+
+    if (modifiers.length > 0 || ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"].includes(mappedKey)) {
+      setSettings((prev) => ({
+        ...prev,
+        hotkey_modifiers: modifiers,
+        hotkey_key: mappedKey,
+      }));
+      setIsRecordingHotkey(false);
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      await invoke("save_settings", { settings });
+      setStatus("Settings saved!");
+      setTimeout(() => setStatus(null), 2000);
+    } catch (e) {
+      console.error("Failed to save settings:", e);
+      setStatus("Failed to save settings");
+      setTimeout(() => setStatus(null), 2000);
+    }
+  };
+
+  const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
+  const showResults = query.length > 0 && !showSettings;
 
   return (
     <div className="p-2">
+      {/* Search Bar */}
       <div
         className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
-          showResults ? "rounded-t-buncha" : "rounded-buncha"
+          showResults || showSettings ? "rounded-t-buncha" : "rounded-buncha"
         }`}
       >
         <div className="flex items-center px-4 py-3">
@@ -140,18 +243,24 @@ function App() {
           <input
             ref={inputRef}
             type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={showSettings ? "Settings" : query}
+            onChange={(e) => !showSettings && setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={status || "Search for tools..."}
+            readOnly={showSettings}
             className={`flex-1 bg-transparent text-base outline-none ${
-              status ? "text-buncha-accent placeholder-buncha-accent" : "text-buncha-text placeholder-buncha-text-muted"
-            }`}
+              status
+                ? "text-buncha-accent placeholder-buncha-accent"
+                : "text-buncha-text placeholder-buncha-text-muted"
+            } ${showSettings ? "cursor-default" : ""}`}
             autoFocus
           />
-          {query && (
+          {(query || showSettings) && (
             <button
-              onClick={() => setQuery("")}
+              onClick={() => {
+                setQuery("");
+                setShowSettings(false);
+              }}
               className="text-buncha-text-muted hover:text-buncha-text ml-2"
             >
               <svg
@@ -172,6 +281,81 @@ function App() {
         </div>
       </div>
 
+      {/* Settings Panel */}
+      {showSettings && (
+        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+          <div className="p-4 space-y-4">
+            {/* Hotkey Setting */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-buncha-text text-sm font-medium">Hotkey</div>
+                <div className="text-buncha-text-muted text-xs">
+                  Keyboard shortcut to open BunchaTools
+                </div>
+              </div>
+              <div
+                ref={hotkeyInputRef}
+                tabIndex={0}
+                onClick={() => setIsRecordingHotkey(true)}
+                onKeyDown={isRecordingHotkey ? handleHotkeyKeyDown : undefined}
+                onBlur={() => setIsRecordingHotkey(false)}
+                className={`px-4 py-2 rounded-lg border cursor-pointer min-w-32 text-center transition-colors ${
+                  isRecordingHotkey
+                    ? "border-buncha-accent bg-buncha-accent/20 text-buncha-accent"
+                    : "border-buncha-border bg-buncha-surface text-buncha-text hover:border-buncha-text-muted"
+                }`}
+              >
+                {isRecordingHotkey ? "Press keys..." : hotkeyDisplay}
+              </div>
+            </div>
+
+            {/* Launch at Startup */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-buncha-text text-sm font-medium">
+                  Launch at startup
+                </div>
+                <div className="text-buncha-text-muted text-xs">
+                  Start BunchaTools when you log in
+                </div>
+              </div>
+              <button
+                onClick={() =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    launch_at_startup: !prev.launch_at_startup,
+                  }))
+                }
+                className={`w-12 h-6 rounded-full transition-colors relative ${
+                  settings.launch_at_startup
+                    ? "bg-buncha-accent"
+                    : "bg-buncha-surface border border-buncha-border"
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+                    settings.launch_at_startup
+                      ? "translate-x-6"
+                      : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Save Button */}
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={saveSettings}
+                className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors"
+              >
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search Results */}
       {showResults && (
         <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl max-h-60 overflow-y-auto">
           {filteredTools.length > 0 ? (
@@ -198,7 +382,9 @@ function App() {
                       {tool.description}
                     </div>
                   </div>
-                  <span className="text-buncha-text-muted text-xs">Tool</span>
+                  <span className="text-buncha-text-muted text-xs">
+                    {tool.isSettings ? "Settings" : "Tool"}
+                  </span>
                 </div>
               ))}
             </div>
