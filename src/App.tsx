@@ -2,16 +2,16 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 interface Tool {
   id: string;
   name: string;
   description: string;
   icon: string;
+  keywords: string[];
+  action: () => Promise<void>;
 }
-
-// Placeholder tools for future implementation
-const tools: Tool[] = [];
 
 const BASE_HEIGHT = 60;
 const RESULTS_HEIGHT = 300;
@@ -20,13 +20,38 @@ function App() {
   const [query, setQuery] = useState("");
   const [filteredTools, setFilteredTools] = useState<Tool[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [status, setStatus] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Define tools
+  const tools: Tool[] = [
+    {
+      id: "color-picker",
+      name: "Color Picker",
+      description: "Pick any color from your screen",
+      icon: "🎨",
+      keywords: ["color", "picker", "eyedropper", "hex", "rgb", "colour"],
+      action: async () => {
+        try {
+          const color = await invoke<string>("pick_color");
+          await writeText(color);
+          setStatus(`Copied ${color}`);
+          setTimeout(() => setStatus(null), 2000);
+        } catch (e) {
+          if (e !== "Cancelled") {
+            console.error("Color picker error:", e);
+          }
+        }
+      },
+    },
+  ];
 
   useEffect(() => {
     // Listen for focus-search event from backend
     const unlisten = listen("focus-search", () => {
       setQuery("");
       setSelectedIndex(0);
+      setStatus(null);
       inputRef.current?.focus();
     });
 
@@ -43,10 +68,12 @@ function App() {
       setFilteredTools([]);
       setSelectedIndex(0);
     } else {
+      const q = query.toLowerCase();
       const filtered = tools.filter(
         (tool) =>
-          tool.name.toLowerCase().includes(query.toLowerCase()) ||
-          tool.description.toLowerCase().includes(query.toLowerCase())
+          tool.name.toLowerCase().includes(q) ||
+          tool.description.toLowerCase().includes(q) ||
+          tool.keywords.some((k) => k.includes(q))
       );
       setFilteredTools(filtered);
       setSelectedIndex(0);
@@ -64,7 +91,12 @@ function App() {
     resizeWindow();
   }, [query.length > 0]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const executeTool = async (tool: Tool) => {
+    setQuery("");
+    await tool.action();
+  };
+
+  const handleKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       invoke("hide_window");
       setQuery("");
@@ -77,8 +109,8 @@ function App() {
       e.preventDefault();
       setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
     } else if (e.key === "Enter" && filteredTools.length > 0) {
-      // TODO: Execute selected tool
-      console.log("Execute tool:", filteredTools[selectedIndex]);
+      e.preventDefault();
+      await executeTool(filteredTools[selectedIndex]);
     }
   };
 
@@ -111,8 +143,10 @@ function App() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search for tools..."
-            className="flex-1 bg-transparent text-buncha-text text-base outline-none placeholder-buncha-text-muted"
+            placeholder={status || "Search for tools..."}
+            className={`flex-1 bg-transparent text-base outline-none ${
+              status ? "text-buncha-accent placeholder-buncha-accent" : "text-buncha-text placeholder-buncha-text-muted"
+            }`}
             autoFocus
           />
           {query && (
@@ -148,6 +182,7 @@ function App() {
               {filteredTools.map((tool, index) => (
                 <div
                   key={tool.id}
+                  onClick={() => executeTool(tool)}
                   className={`flex items-center px-4 py-2 cursor-pointer ${
                     index === selectedIndex
                       ? "bg-buncha-surface"
