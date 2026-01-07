@@ -1,5 +1,6 @@
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    window::Color,
     Emitter, Manager,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
@@ -97,6 +98,10 @@ pub fn run() {
 
             // Handle window blur (click outside)
             let window = app.get_webview_window("main").unwrap();
+
+            // Set webview background to transparent (fixes white border on Windows)
+            let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
+
             let window_clone = window.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(false) = event {
