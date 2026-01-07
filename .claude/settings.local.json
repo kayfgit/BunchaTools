@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\\\projects\\\\BunchaTools\")",
+      "Bash(npm create tauri-app@latest . -- --template react-ts --manager npm)",
+      "Bash(npm init -y)",
+      "Bash(npm install:*)",
+      "Bash(npx tauri init:*)",
+      "Bash(npm run tauri:*)"
+    ]
+  }
+}
