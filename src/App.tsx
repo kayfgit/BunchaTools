@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 interface Tool {
   id: string;
@@ -23,6 +24,29 @@ interface Settings {
 const BASE_HEIGHT = 60;
 const RESULTS_HEIGHT = 300;
 const SETTINGS_HEIGHT = 250;
+const CONVERTER_HEIGHT = 400;
+
+// Format options for converter
+const FORMAT_OPTIONS = {
+  image: ["PNG", "JPG", "WEBP", "GIF", "BMP", "ICO"],
+  audio: ["MP3", "WAV", "FLAC", "AAC", "OGG", "M4A"],
+  video: ["MP4", "AVI", "MOV", "GIF", "WEBM", "MKV"],
+};
+
+// File type filters for open dialog
+const FILE_FILTERS = {
+  image: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "tiff"] }],
+  audio: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "aac", "ogg", "m4a", "wma"] }],
+  video: [{ name: "Video", extensions: ["mp4", "avi", "mov", "mkv", "webm", "wmv", "flv"] }],
+};
+
+type ConverterType = "image" | "audio" | "video";
+
+interface SelectedFile {
+  name: string;
+  path: string;
+  size: number;
+}
 
 // Safe calculator function that evaluates basic math expressions
 function evaluateExpression(expr: string): string | null {
@@ -84,6 +108,15 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
 
+  // Converter state
+  const [showConverter, setShowConverter] = useState(false);
+  const [converterType, setConverterType] = useState<ConverterType | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
+  const [targetFormat, setTargetFormat] = useState<string | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionProgress, setConversionProgress] = useState(0);
+  const [conversionStatus, setConversionStatus] = useState<'idle' | 'converting' | 'success' | 'error'>('idle');
+
   // Define tools
   const tools: Tool[] = [
     {
@@ -113,6 +146,21 @@ function App() {
       keywords: ["settings", "preferences", "config", "options", "hotkey", "startup"],
       isSettings: true,
     },
+    {
+      id: "omni-converter",
+      name: "Omni Converter",
+      description: "Convert images, audio, and video files",
+      icon: "🔄",
+      keywords: ["convert", "converter", "video", "audio", "image", "mp4", "mp3", "png", "jpg", "wav", "gif", "webp", "avi", "mkv"],
+      action: async () => {
+        await invoke("set_auto_hide", { enabled: false });
+        setShowConverter(true);
+        setConverterType(null);
+        setSelectedFile(null);
+        setTargetFormat(null);
+        setQuery("");
+      },
+    },
   ];
 
   // Load settings on mount
@@ -128,12 +176,28 @@ function App() {
     loadSettings();
   }, []);
 
+  // Listen for conversion progress events
   useEffect(() => {
-    const unlisten = listen("focus-search", () => {
+    const unlisten = listen<number>("conversion-progress", (event) => {
+      setConversionProgress(event.payload);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen("focus-search", async () => {
+      await invoke("set_auto_hide", { enabled: true });
       setQuery("");
       setSelectedIndex(0);
       setStatus(null);
       setShowSettings(false);
+      setShowConverter(false);
+      setConverterType(null);
+      setSelectedFile(null);
+      setTargetFormat(null);
       inputRef.current?.focus();
     });
 
@@ -167,7 +231,9 @@ function App() {
       const appWindow = getCurrentWindow();
       let newHeight = BASE_HEIGHT;
 
-      if (showSettings) {
+      if (showConverter) {
+        newHeight = CONVERTER_HEIGHT;
+      } else if (showSettings) {
         newHeight = SETTINGS_HEIGHT;
       } else if (query.length > 0) {
         newHeight = RESULTS_HEIGHT;
@@ -176,7 +242,7 @@ function App() {
       await appWindow.setSize(new LogicalSize(600, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0, showSettings]);
+  }, [query.length > 0, showSettings, showConverter]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -190,13 +256,19 @@ function App() {
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
-      if (showSettings) {
+      if (showConverter) {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowConverter(false);
+        setConverterType(null);
+        setSelectedFile(null);
+        setTargetFormat(null);
+      } else if (showSettings) {
         setShowSettings(false);
       } else {
         invoke("hide_window");
         setQuery("");
       }
-    } else if (!showSettings) {
+    } else if (!showSettings && !showConverter) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -261,18 +333,111 @@ function App() {
   };
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
-  const showResults = query.length > 0 && !showSettings;
+  const showResults = query.length > 0 && !showSettings && !showConverter;
   const calculatorResult = query ? evaluateExpression(query) : null;
+
+  // Handle window dragging
+  const handleDragStart = async (e: React.MouseEvent) => {
+    // Only start drag if clicking on the drag handle area (not on inputs/buttons)
+    if ((e.target as HTMLElement).closest('input, button, [data-no-drag]')) return;
+    await getCurrentWindow().startDragging();
+  };
+
+  // Helper to get file extension
+  const getFileExtension = (filename: string) => {
+    return filename.split(".").pop()?.toUpperCase() || "";
+  };
+
+  // Helper to format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  // Handle file selection via dialog
+  const handleSelectFile = async () => {
+    if (!converterType) return;
+    const result = await open({
+      filters: FILE_FILTERS[converterType],
+      multiple: false,
+    });
+    if (result) {
+      // Get file info
+      const path = result as string;
+      const name = path.split(/[\\/]/).pop() || "";
+      // We'll estimate size client-side or could add a backend command
+      setSelectedFile({ name, path, size: 0 });
+      setTargetFormat(null);
+    }
+  };
+
+  // Handle conversion
+  const handleConvert = async () => {
+    if (!selectedFile || !targetFormat || !converterType) return;
+
+    const ext = targetFormat.toLowerCase();
+    const defaultName = selectedFile.name.replace(/\.[^.]+$/, `.${ext}`);
+
+    const outputPath = await save({
+      defaultPath: defaultName,
+      filters: [{ name: targetFormat, extensions: [ext] }],
+    });
+
+    if (!outputPath) return;
+
+    setIsConverting(true);
+    setConversionProgress(0);
+    setConversionStatus('converting');
+
+    try {
+      if (converterType === "image") {
+        await invoke("convert_image", { inputPath: selectedFile.path, outputPath });
+      } else {
+        await invoke("convert_media", { inputPath: selectedFile.path, outputPath });
+      }
+
+      // Show success state
+      setConversionStatus('success');
+      setConversionProgress(100);
+
+      // Wait a moment to show success, then close
+      setTimeout(async () => {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowConverter(false);
+        setConverterType(null);
+        setSelectedFile(null);
+        setTargetFormat(null);
+        setIsConverting(false);
+        setConversionStatus('idle');
+        setConversionProgress(0);
+      }, 1500);
+    } catch (e) {
+      console.error("Conversion error:", e);
+      setConversionStatus('error');
+      // Show error in status bar
+      setStatus(String(e));
+
+      // Reset after showing error
+      setTimeout(() => {
+        setIsConverting(false);
+        setConversionStatus('idle');
+        setConversionProgress(0);
+        setStatus(null);
+      }, 4000);
+    }
+  };
 
   return (
     <div className="p-2">
       {/* Search Bar */}
       <div
         className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
-          showResults || showSettings ? "rounded-t-buncha" : "rounded-buncha"
+          showResults || showSettings || showConverter ? "rounded-t-buncha" : "rounded-buncha"
         }`}
+        onMouseDown={handleDragStart}
       >
-        <div className="flex items-center px-4 py-3">
+        <div className="flex items-center px-4 py-3 cursor-default">
           <svg
             className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0"
             fill="none"
@@ -289,18 +454,18 @@ function App() {
           <input
             ref={inputRef}
             type="text"
-            value={showSettings ? "Settings" : query}
-            onChange={(e) => !showSettings && setQuery(e.target.value)}
+            value={showConverter ? "Omni Converter" : showSettings ? "Settings" : query}
+            onChange={(e) => !showSettings && !showConverter && setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={status || "Search for tools..."}
-            readOnly={showSettings}
+            readOnly={showSettings || showConverter}
             className={`bg-transparent text-base outline-none ${
               calculatorResult ? "" : "flex-1"
             } ${
               status
                 ? "text-buncha-accent placeholder-buncha-accent"
                 : "text-buncha-text placeholder-buncha-text-muted"
-            } ${showSettings ? "cursor-default" : ""}`}
+            } ${showSettings || showConverter ? "cursor-default" : ""}`}
             style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
             autoFocus
           />
@@ -309,13 +474,20 @@ function App() {
               = {calculatorResult}
             </span>
           )}
-          {(query || showSettings) && (
+          {(query || showSettings || showConverter) && (
             <button
-              onClick={() => {
+              onClick={async () => {
+                if (showConverter) {
+                  await invoke("set_auto_hide", { enabled: true });
+                }
                 setQuery("");
                 setShowSettings(false);
+                setShowConverter(false);
+                setConverterType(null);
+                setSelectedFile(null);
+                setTargetFormat(null);
               }}
-              className="text-buncha-text-muted hover:text-buncha-text ml-2"
+              className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
             >
               <svg
                 className="w-4 h-4"
@@ -353,7 +525,7 @@ function App() {
                 onClick={() => setIsRecordingHotkey(true)}
                 onKeyDown={isRecordingHotkey ? handleHotkeyKeyDown : undefined}
                 onBlur={() => setIsRecordingHotkey(false)}
-                className={`px-4 py-2 rounded-lg border cursor-pointer min-w-32 text-center transition-colors ${
+                className={`px-4 py-2 rounded-lg border min-w-32 text-center transition-colors cursor-pointer ${
                   isRecordingHotkey
                     ? "border-buncha-accent bg-buncha-accent/20 text-buncha-accent"
                     : "border-buncha-border bg-buncha-surface text-buncha-text hover:border-buncha-text-muted"
@@ -380,7 +552,7 @@ function App() {
                     launch_at_startup: !prev.launch_at_startup,
                   }))
                 }
-                className={`w-12 h-6 rounded-full transition-colors relative ${
+                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
                   settings.launch_at_startup
                     ? "bg-buncha-accent"
                     : "bg-buncha-surface border border-buncha-border"
@@ -400,11 +572,222 @@ function App() {
             <div className="pt-2 flex justify-end">
               <button
                 onClick={saveSettings}
-                className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors"
+                className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors cursor-pointer"
               >
                 Save Settings
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Converter Panel */}
+      {showConverter && (
+        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+          <div className="p-4">
+            {/* Type Selection View */}
+            {!converterType && (
+              <>
+                <div className="text-buncha-text text-sm font-medium mb-4">
+                  Choose conversion type
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Images */}
+                  <button
+                    onClick={() => setConverterType("image")}
+                    className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
+                  >
+                    <svg className="w-8 h-8 mb-2 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                    <span className="text-blue-500 text-sm font-medium">Images</span>
+                  </button>
+                  {/* Audio */}
+                  <button
+                    onClick={() => setConverterType("audio")}
+                    className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
+                  >
+                    <svg className="w-8 h-8 mb-2 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                    <span className="text-green-500 text-sm font-medium">Audio</span>
+                  </button>
+                  {/* Video */}
+                  <button
+                    onClick={() => setConverterType("video")}
+                    className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
+                  >
+                    <svg className="w-8 h-8 mb-2 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="2" y="4" width="16" height="14" rx="2" />
+                      <path d="M22 7l-4 3 4 3V7z" />
+                    </svg>
+                    <span className="text-purple-500 text-sm font-medium">Video</span>
+                  </button>
+                  {/* Documents - Disabled */}
+                  <button
+                    disabled
+                    className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface opacity-50 cursor-not-allowed"
+                  >
+                    <svg className="w-8 h-8 mb-2 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <path d="M14 2v6h6" />
+                      <path d="M16 13H8" />
+                      <path d="M16 17H8" />
+                    </svg>
+                    <span className="text-orange-500 text-sm font-medium">Documents</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Conversion View */}
+            {converterType && (
+              <>
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-buncha-text text-sm font-medium">
+                    {converterType.charAt(0).toUpperCase() + converterType.slice(1)} Conversion
+                  </div>
+                  <button
+                    onClick={() => {
+                      setConverterType(null);
+                      setSelectedFile(null);
+                      setTargetFormat(null);
+                    }}
+                    className="text-buncha-accent text-sm hover:underline cursor-pointer"
+                  >
+                    Change type
+                  </button>
+                </div>
+
+                {/* File Selection */}
+                <div className="text-buncha-text-muted text-xs mb-2">Select file</div>
+                {!selectedFile ? (
+                  <button
+                    onClick={handleSelectFile}
+                    className="w-full p-8 border-2 border-dashed border-buncha-border rounded-lg hover:border-buncha-text-muted transition-colors flex flex-col items-center justify-center cursor-pointer"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-buncha-surface flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                    </div>
+                    <span className="text-buncha-accent text-sm font-medium">Click to upload</span>
+                    <span className="text-buncha-text-muted text-xs mt-1">or drag and drop your file here</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center p-3 bg-buncha-surface rounded-lg border border-buncha-border">
+                    <div className="w-10 h-10 rounded bg-buncha-bg flex items-center justify-center mr-3">
+                      <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 2v6h6" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-buncha-text text-sm font-medium truncate">{selectedFile.name}</div>
+                      {selectedFile.size > 0 && (
+                        <div className="text-buncha-text-muted text-xs">{formatFileSize(selectedFile.size)}</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedFile(null);
+                        setTargetFormat(null);
+                      }}
+                      className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {/* Format Selection */}
+                {selectedFile && (
+                  <>
+                    <div className="text-buncha-text-muted text-xs mt-4 mb-2">Convert to</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {FORMAT_OPTIONS[converterType].map((format) => {
+                        const isCurrentFormat = getFileExtension(selectedFile.name) === format;
+                        const isSelected = targetFormat === format;
+                        return (
+                          <button
+                            key={format}
+                            onClick={() => !isCurrentFormat && setTargetFormat(format)}
+                            disabled={isCurrentFormat}
+                            className={`py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                              isCurrentFormat
+                                ? "bg-buncha-surface text-buncha-text-muted cursor-not-allowed"
+                                : isSelected
+                                ? "bg-buncha-accent text-white cursor-pointer"
+                                : "bg-buncha-surface text-buncha-text border border-buncha-border hover:border-buncha-text-muted cursor-pointer"
+                            }`}
+                          >
+                            {isSelected && (
+                              <svg className="w-4 h-4 inline mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                            {format}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Convert Button / Progress Bar */}
+                    {targetFormat && (
+                      <>
+                        {!isConverting ? (
+                          <button
+                            onClick={handleConvert}
+                            className="w-full mt-4 py-3 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors cursor-pointer"
+                          >
+                            Convert {getFileExtension(selectedFile.name)} → {targetFormat}
+                          </button>
+                        ) : (
+                          <div className="w-full mt-4 relative">
+                            {/* Progress bar background */}
+                            <div
+                              className={`w-full py-3 rounded-lg text-sm font-medium text-center text-white relative overflow-hidden transition-colors ${
+                                conversionStatus === 'success'
+                                  ? 'bg-green-600'
+                                  : conversionStatus === 'error'
+                                  ? 'bg-red-600'
+                                  : 'bg-buncha-surface border border-buncha-border'
+                              }`}
+                            >
+                              {/* Progress fill - only show during converting */}
+                              {conversionStatus === 'converting' && (
+                                <div
+                                  className="absolute inset-0 bg-buncha-accent transition-all duration-300 ease-out"
+                                  style={{ width: `${conversionProgress}%` }}
+                                />
+                              )}
+                              {/* Text */}
+                              <span className="relative z-10">
+                                {conversionStatus === 'success'
+                                  ? 'Completed'
+                                  : conversionStatus === 'error'
+                                  ? 'Failed to convert'
+                                  : `Converting: ${conversionProgress}%`}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -421,7 +804,7 @@ function App() {
                 <div
                   key={tool.id}
                   onClick={() => executeTool(tool)}
-                  className={`flex items-center px-4 py-2 cursor-pointer ${
+                  className={`flex items-center px-4 py-2 cursor-pointer select-none ${
                     index === selectedIndex
                       ? "bg-buncha-surface"
                       : "hover:bg-buncha-surface"

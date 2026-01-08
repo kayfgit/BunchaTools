@@ -47,6 +47,7 @@ impl Default for Settings {
 struct AppState {
     current_shortcut: Mutex<Option<Shortcut>>,
     settings: Mutex<Settings>,
+    auto_hide_enabled: Mutex<bool>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -236,6 +237,179 @@ fn update_global_shortcut(app: &AppHandle, settings: &Settings) -> Result<(), St
     Ok(())
 }
 
+#[tauri::command]
+fn set_auto_hide(app: AppHandle, enabled: bool) {
+    let state = app.state::<AppState>();
+    *state.auto_hide_enabled.lock().unwrap() = enabled;
+}
+
+#[tauri::command]
+async fn convert_image(app: AppHandle, input_path: String, output_path: String) -> Result<(), String> {
+    // Emit start
+    let _ = app.emit("conversion-progress", 0);
+
+    // Load image
+    let _ = app.emit("conversion-progress", 30);
+    let img = image::open(&input_path).map_err(|e| e.to_string())?;
+
+    // Save image
+    let _ = app.emit("conversion-progress", 70);
+    img.save(&output_path).map_err(|e| e.to_string())?;
+
+    // Complete
+    let _ = app.emit("conversion-progress", 100);
+    Ok(())
+}
+
+// Helper to get media duration using ffmpeg
+fn get_media_duration(ffmpeg_path: &std::path::Path, input_path: &str) -> Option<f64> {
+    let output = std::process::Command::new(ffmpeg_path)
+        .args(["-i", input_path])
+        .output()
+        .ok()?;
+
+    // FFmpeg outputs duration to stderr
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Parse duration from "Duration: HH:MM:SS.ms"
+    for line in stderr.lines() {
+        if line.contains("Duration:") {
+            if let Some(duration_str) = line.split("Duration:").nth(1) {
+                let duration_part = duration_str.split(',').next()?.trim();
+                let parts: Vec<&str> = duration_part.split(':').collect();
+                if parts.len() == 3 {
+                    let hours: f64 = parts[0].parse().ok()?;
+                    let minutes: f64 = parts[1].parse().ok()?;
+                    let seconds: f64 = parts[2].parse().ok()?;
+                    return Some(hours * 3600.0 + minutes * 60.0 + seconds);
+                }
+            }
+        }
+    }
+    None
+}
+
+// Helper to parse time from ffmpeg progress output
+fn parse_time_from_progress(line: &str) -> Option<f64> {
+    // Format: "out_time_ms=123456789" or "out_time=00:01:23.456789"
+    if line.starts_with("out_time_ms=") {
+        let ms_str = line.strip_prefix("out_time_ms=")?;
+        let ms: i64 = ms_str.parse().ok()?;
+        return Some(ms as f64 / 1_000_000.0);
+    }
+    if line.starts_with("out_time=") {
+        let time_str = line.strip_prefix("out_time=")?;
+        let parts: Vec<&str> = time_str.split(':').collect();
+        if parts.len() == 3 {
+            let hours: f64 = parts[0].parse().ok()?;
+            let minutes: f64 = parts[1].parse().ok()?;
+            let seconds: f64 = parts[2].parse().ok()?;
+            return Some(hours * 3600.0 + minutes * 60.0 + seconds);
+        }
+    }
+    None
+}
+
+#[tauri::command]
+async fn convert_media(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    // Get bundled ffmpeg path - try multiple locations
+    let ffmpeg = {
+        // First try: relative to executable (for production builds)
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .parent()
+            .ok_or("Failed to get exe directory")?
+            .to_path_buf();
+
+        // Get current working directory
+        let cwd = std::env::current_dir().unwrap_or_default();
+
+        let possible_paths = vec![
+            // Production paths
+            exe_dir.join("ffmpeg.exe"),
+            exe_dir.join("binaries").join("ffmpeg.exe"),
+            // Development paths (relative to cwd)
+            cwd.join("src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"),
+            cwd.join("binaries/ffmpeg-x86_64-pc-windows-msvc.exe"),
+            // Absolute path for this project
+            std::path::PathBuf::from(r"C:\projects\BunchaTools\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe"),
+        ];
+
+        let mut found_path = None;
+        for path in &possible_paths {
+            if path.exists() {
+                found_path = Some(path.clone());
+                log::info!("Found FFmpeg at: {:?}", path);
+                break;
+            }
+        }
+
+        found_path.ok_or_else(|| {
+            format!("FFmpeg not found. CWD: {:?}, Searched in: {:?}", cwd, possible_paths)
+        })?
+    };
+
+    // Get total duration
+    let total_duration = get_media_duration(&ffmpeg, &input_path).unwrap_or(0.0);
+
+    // Emit initial progress
+    let _ = app.emit("conversion-progress", 0);
+
+    // Run ffmpeg with progress output
+    let mut child = Command::new(&ffmpeg)
+        .args([
+            "-i", &input_path,
+            "-y",
+            "-progress", "pipe:1",
+            "-nostats",
+            &output_path
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    // Read progress from stdout
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        let mut last_progress = 0;
+
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                if let Some(current_time) = parse_time_from_progress(&line) {
+                    if total_duration > 0.0 {
+                        let progress = ((current_time / total_duration) * 100.0).min(99.0) as i32;
+                        // Only emit in increments of 10
+                        let progress_rounded = (progress / 10) * 10;
+                        if progress_rounded > last_progress {
+                            last_progress = progress_rounded;
+                            let _ = app.emit("conversion-progress", progress_rounded);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Wait for process to complete
+    let status = child.wait().map_err(|e| e.to_string())?;
+
+    if !status.success() {
+        return Err("Conversion failed".to_string());
+    }
+
+    // Emit completion
+    let _ = app.emit("conversion-progress", 100);
+    Ok(())
+}
+
 #[cfg(windows)]
 #[tauri::command]
 async fn pick_color(window: tauri::Window) -> Result<String, String> {
@@ -326,9 +500,11 @@ fn toggle_window(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             current_shortcut: Mutex::new(None),
             settings: Mutex::new(Settings::default()),
+            auto_hide_enabled: Mutex::new(true),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -420,9 +596,14 @@ pub fn run() {
             let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
 
             let window_clone = window.clone();
+            let app_handle_for_blur = app.handle().clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(false) = event {
-                    let _ = window_clone.hide();
+                    let state = app_handle_for_blur.state::<AppState>();
+                    let auto_hide = *state.auto_hide_enabled.lock().unwrap();
+                    if auto_hide {
+                        let _ = window_clone.hide();
+                    }
                 }
             });
 
@@ -434,7 +615,10 @@ pub fn run() {
             pick_color,
             get_settings,
             save_settings,
-            get_launch_at_startup
+            get_launch_at_startup,
+            set_auto_hide,
+            convert_image,
+            convert_media
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
