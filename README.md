@@ -4,11 +4,7 @@
 
 - advanced color picker beyond hex codes, provide hsl, rgb, okLCH values
 - local port killer
-- add image converter 
-- add video converter  
-- add audio converter  
-- add documents converter  like ilovepdf 
-- audio booster tool that 
+- add documents converter like ilovepdf 
 - clipboard history
 
 ## GENERAL TODOS
