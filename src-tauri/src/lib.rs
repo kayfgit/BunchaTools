@@ -31,6 +31,8 @@ pub struct Settings {
     pub hotkey_modifiers: Vec<String>, // ["Alt"], ["Ctrl", "Shift"], etc.
     pub hotkey_key: String,            // "Q", "Space", etc.
     pub launch_at_startup: bool,
+    #[serde(default)]
+    pub window_position: Option<(i32, i32)>, // Saved window position (x, y)
 }
 
 impl Default for Settings {
@@ -39,6 +41,7 @@ impl Default for Settings {
             hotkey_modifiers: vec!["Alt".to_string()],
             hotkey_key: "Q".to_string(),
             launch_at_startup: false,
+            window_position: None,
         }
     }
 }
@@ -48,6 +51,7 @@ struct AppState {
     current_shortcut: Mutex<Option<Shortcut>>,
     settings: Mutex<Settings>,
     auto_hide_enabled: Mutex<bool>,
+    is_dragging: Mutex<bool>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -241,6 +245,20 @@ fn update_global_shortcut(app: &AppHandle, settings: &Settings) -> Result<(), St
 fn set_auto_hide(app: AppHandle, enabled: bool) {
     let state = app.state::<AppState>();
     *state.auto_hide_enabled.lock().unwrap() = enabled;
+}
+
+#[tauri::command]
+fn set_dragging(app: AppHandle, dragging: bool) {
+    let state = app.state::<AppState>();
+    *state.is_dragging.lock().unwrap() = dragging;
+}
+
+#[tauri::command]
+fn save_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut settings = state.settings.lock().unwrap();
+    settings.window_position = Some((x, y));
+    save_settings_to_file(&app, &settings)
 }
 
 #[tauri::command]
@@ -488,7 +506,16 @@ fn toggle_window(app: &AppHandle) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.center();
+            // Check for saved position
+            let state = app.state::<AppState>();
+            let settings = state.settings.lock().unwrap();
+            if let Some((x, y)) = settings.window_position {
+                use tauri::LogicalPosition;
+                let _ = window.set_position(LogicalPosition::new(x, y));
+            } else {
+                let _ = window.center();
+            }
+            drop(settings); // Release lock before show
             let _ = window.show();
             let _ = window.set_focus();
             let _ = app.emit("focus-search", ());
@@ -505,6 +532,7 @@ pub fn run() {
             current_shortcut: Mutex::new(None),
             settings: Mutex::new(Settings::default()),
             auto_hide_enabled: Mutex::new(true),
+            is_dragging: Mutex::new(false),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -598,12 +626,24 @@ pub fn run() {
             let window_clone = window.clone();
             let app_handle_for_blur = app.handle().clone();
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Focused(false) = event {
-                    let state = app_handle_for_blur.state::<AppState>();
-                    let auto_hide = *state.auto_hide_enabled.lock().unwrap();
-                    if auto_hide {
-                        let _ = window_clone.hide();
+                match event {
+                    tauri::WindowEvent::Focused(false) => {
+                        let state = app_handle_for_blur.state::<AppState>();
+                        let auto_hide = *state.auto_hide_enabled.lock().unwrap();
+                        let is_dragging = *state.is_dragging.lock().unwrap();
+                        // Don't hide if dragging or auto_hide is disabled
+                        if auto_hide && !is_dragging {
+                            let _ = window_clone.hide();
+                        }
                     }
+                    tauri::WindowEvent::Moved(position) => {
+                        // Save position when window is moved
+                        let state = app_handle_for_blur.state::<AppState>();
+                        let mut settings = state.settings.lock().unwrap();
+                        settings.window_position = Some((position.x, position.y));
+                        let _ = save_settings_to_file(&app_handle_for_blur, &settings);
+                    }
+                    _ => {}
                 }
             });
 
@@ -617,6 +657,8 @@ pub fn run() {
             save_settings,
             get_launch_at_startup,
             set_auto_hide,
+            set_dragging,
+            save_window_position,
             convert_image,
             convert_media
         ])

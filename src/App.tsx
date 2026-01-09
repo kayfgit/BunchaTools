@@ -340,7 +340,16 @@ function App() {
   const handleDragStart = async (e: React.MouseEvent) => {
     // Only start drag if clicking on the drag handle area (not on inputs/buttons)
     if ((e.target as HTMLElement).closest('input, button, [data-no-drag]')) return;
-    await getCurrentWindow().startDragging();
+
+    // Set dragging flag to prevent auto-hide during drag
+    await invoke("set_dragging", { dragging: true });
+
+    try {
+      await getCurrentWindow().startDragging();
+    } finally {
+      // Clear dragging flag after drag ends
+      await invoke("set_dragging", { dragging: false });
+    }
   };
 
   // Helper to get file extension
