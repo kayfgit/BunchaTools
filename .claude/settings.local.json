@@ -14,7 +14,10 @@
       "Bash(findstr:*)",
       "Bash(cat:*)",
       "Bash(netstat:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(timeout 30 npm run tauri:*)",
+      "Bash(cmd //c \"tasklist | findstr /i buncha\")"
     ]
   }
 }

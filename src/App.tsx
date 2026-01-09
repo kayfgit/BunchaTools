@@ -25,6 +25,7 @@ const BASE_HEIGHT = 60;
 const RESULTS_HEIGHT = 300;
 const SETTINGS_HEIGHT = 250;
 const CONVERTER_HEIGHT = 400;
+const PORT_KILLER_HEIGHT = 400;
 
 // Format options for converter
 const FORMAT_OPTIONS = {
@@ -47,6 +48,15 @@ interface SelectedFile {
   path: string;
   size: number;
 }
+
+interface PortProcess {
+  pid: number;
+  name: string;
+  port: number;
+  protocol: string;
+}
+
+const COMMON_PORTS = [3000, 3001, 5173, 8080, 8000, 4200, 5000, 1420];
 
 // Safe calculator function that evaluates basic math expressions
 function evaluateExpression(expr: string): string | null {
@@ -117,6 +127,13 @@ function App() {
   const [conversionProgress, setConversionProgress] = useState(0);
   const [conversionStatus, setConversionStatus] = useState<'idle' | 'converting' | 'success' | 'error'>('idle');
 
+  // Port killer state
+  const [showPortKiller, setShowPortKiller] = useState(false);
+  const [portInput, setPortInput] = useState("");
+  const [portProcesses, setPortProcesses] = useState<PortProcess[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannedPort, setScannedPort] = useState<number | null>(null);
+
   // Define tools
   const tools: Tool[] = [
     {
@@ -161,6 +178,21 @@ function App() {
         setQuery("");
       },
     },
+    {
+      id: "port-killer",
+      name: "Port Killer",
+      description: "Free up ports by killing processes",
+      icon: "🔌",
+      keywords: ["port", "kill", "process", "free", "localhost", "server", "3000", "8080", "1420", "network", "tcp"],
+      action: async () => {
+        await invoke("set_auto_hide", { enabled: false });
+        setShowPortKiller(true);
+        setPortInput("");
+        setPortProcesses([]);
+        setScannedPort(null);
+        setQuery("");
+      },
+    },
   ];
 
   // Load settings on mount
@@ -198,6 +230,10 @@ function App() {
       setConverterType(null);
       setSelectedFile(null);
       setTargetFormat(null);
+      setShowPortKiller(false);
+      setPortInput("");
+      setPortProcesses([]);
+      setScannedPort(null);
       inputRef.current?.focus();
     });
 
@@ -233,6 +269,8 @@ function App() {
 
       if (showConverter) {
         newHeight = CONVERTER_HEIGHT;
+      } else if (showPortKiller) {
+        newHeight = PORT_KILLER_HEIGHT;
       } else if (showSettings) {
         newHeight = SETTINGS_HEIGHT;
       } else if (query.length > 0) {
@@ -242,7 +280,7 @@ function App() {
       await appWindow.setSize(new LogicalSize(600, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0, showSettings, showConverter]);
+  }, [query.length > 0, showSettings, showConverter, showPortKiller]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -262,13 +300,19 @@ function App() {
         setConverterType(null);
         setSelectedFile(null);
         setTargetFormat(null);
+      } else if (showPortKiller) {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowPortKiller(false);
+        setPortInput("");
+        setPortProcesses([]);
+        setScannedPort(null);
       } else if (showSettings) {
         setShowSettings(false);
       } else {
         invoke("hide_window");
         setQuery("");
       }
-    } else if (!showSettings && !showConverter) {
+    } else if (!showSettings && !showConverter && !showPortKiller) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -333,8 +377,39 @@ function App() {
   };
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
-  const showResults = query.length > 0 && !showSettings && !showConverter;
+  const showResults = query.length > 0 && !showSettings && !showConverter && !showPortKiller;
   const calculatorResult = query ? evaluateExpression(query) : null;
+
+  // Port killer functions
+  const handleScanPort = async (port: number) => {
+    setIsScanning(true);
+    setScannedPort(port);
+    try {
+      const processes = await invoke<PortProcess[]>("scan_port", { port });
+      setPortProcesses(processes);
+    } catch (e) {
+      console.error("Scan port error:", e);
+      setPortProcesses([]);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleKillProcess = async (pid: number) => {
+    try {
+      await invoke("kill_port_process", { pid });
+      // Re-scan to update the list
+      if (scannedPort !== null) {
+        await handleScanPort(scannedPort);
+      }
+      setStatus("Process killed");
+      setTimeout(() => setStatus(null), 2000);
+    } catch (e) {
+      console.error("Kill process error:", e);
+      setStatus(`Failed: ${e}`);
+      setTimeout(() => setStatus(null), 3000);
+    }
+  };
 
   // Handle window dragging
   const handleDragStart = async (e: React.MouseEvent) => {
@@ -463,18 +538,18 @@ function App() {
           <input
             ref={inputRef}
             type="text"
-            value={showConverter ? "Omni Converter" : showSettings ? "Settings" : query}
-            onChange={(e) => !showSettings && !showConverter && setQuery(e.target.value)}
+            value={showPortKiller ? "Port Killer" : showConverter ? "Omni Converter" : showSettings ? "Settings" : query}
+            onChange={(e) => !showSettings && !showConverter && !showPortKiller && setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={status || "Search for tools..."}
-            readOnly={showSettings || showConverter}
+            readOnly={showSettings || showConverter || showPortKiller}
             className={`bg-transparent text-base outline-none ${
               calculatorResult ? "" : "flex-1"
             } ${
               status
                 ? "text-buncha-accent placeholder-buncha-accent"
                 : "text-buncha-text placeholder-buncha-text-muted"
-            } ${showSettings || showConverter ? "cursor-default" : ""}`}
+            } ${showSettings || showConverter || showPortKiller ? "cursor-default" : ""}`}
             style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
             autoFocus
           />
@@ -483,10 +558,10 @@ function App() {
               = {calculatorResult}
             </span>
           )}
-          {(query || showSettings || showConverter) && (
+          {(query || showSettings || showConverter || showPortKiller) && (
             <button
               onClick={async () => {
-                if (showConverter) {
+                if (showConverter || showPortKiller) {
                   await invoke("set_auto_hide", { enabled: true });
                 }
                 setQuery("");
@@ -495,6 +570,10 @@ function App() {
                 setConverterType(null);
                 setSelectedFile(null);
                 setTargetFormat(null);
+                setShowPortKiller(false);
+                setPortInput("");
+                setPortProcesses([]);
+                setScannedPort(null);
               }}
               className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
             >
@@ -797,6 +876,120 @@ function App() {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Port Killer Panel */}
+      {showPortKiller && (
+        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+          <div className="p-4">
+            {/* Port Input */}
+            <div className="text-buncha-text text-sm font-medium mb-3">Enter port number</div>
+            <div className="flex gap-3 mb-4">
+              <input
+                type="text"
+                value={portInput}
+                onChange={(e) => setPortInput(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && portInput) {
+                    handleScanPort(parseInt(portInput));
+                  }
+                }}
+                placeholder="e.g., 3000"
+                className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-2 text-buncha-text placeholder-buncha-text-muted outline-none focus:border-buncha-accent"
+                data-no-drag
+              />
+              <button
+                onClick={() => portInput && handleScanPort(parseInt(portInput))}
+                disabled={!portInput || isScanning}
+                className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="M21 21l-4.35-4.35" />
+                </svg>
+                Scan
+              </button>
+            </div>
+
+            {/* Common Ports */}
+            <div className="text-buncha-text-muted text-xs mb-2">Common ports</div>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {COMMON_PORTS.map((port) => (
+                <button
+                  key={port}
+                  onClick={() => {
+                    setPortInput(port.toString());
+                    handleScanPort(port);
+                  }}
+                  className="px-3 py-1.5 bg-buncha-surface border border-buncha-border rounded-lg text-buncha-text text-sm hover:border-buncha-text-muted transition-colors cursor-pointer"
+                >
+                  {port}
+                </button>
+              ))}
+            </div>
+
+            {/* Results Area */}
+            <div className="min-h-[140px] flex flex-col">
+              {isScanning ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="flex flex-col items-center text-buncha-text-muted">
+                    <svg className="w-6 h-6 animate-spin mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                    </svg>
+                    <span className="text-sm">Scanning port {scannedPort}...</span>
+                  </div>
+                </div>
+              ) : portProcesses.length > 0 ? (
+                <div className="space-y-2">
+                  {portProcesses.map((process) => (
+                    <div
+                      key={process.pid}
+                      className="flex items-center justify-between p-3 bg-buncha-surface rounded-lg border border-buncha-border"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-buncha-bg flex items-center justify-center">
+                          <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2" />
+                            <path d="M8 21h8" />
+                            <path d="M12 17v4" />
+                          </svg>
+                        </div>
+                        <div>
+                          <div className="text-buncha-text text-sm font-medium">{process.name}</div>
+                          <div className="text-buncha-text-muted text-xs">
+                            PID: {process.pid} | {process.protocol} :{process.port}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleKillProcess(process.pid)}
+                        className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors cursor-pointer"
+                      >
+                        Kill
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="flex flex-col items-center text-buncha-text-muted">
+                    <svg className="w-10 h-10 mb-2 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 8v4" />
+                      <circle cx="12" cy="16" r="1" fill="currentColor" />
+                    </svg>
+                    <span className="text-sm">
+                      {scannedPort !== null
+                        ? `No processes found on port ${scannedPort}`
+                        : "No active processes found. Enter a port number to scan."}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

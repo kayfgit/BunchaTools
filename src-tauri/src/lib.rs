@@ -501,6 +501,124 @@ async fn pick_color(_window: tauri::Window) -> Result<String, String> {
     Err("Color picker is only supported on Windows".to_string())
 }
 
+// Port process info structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortProcess {
+    pub pid: u32,
+    pub name: String,
+    pub port: u16,
+    pub protocol: String,
+}
+
+#[tauri::command]
+async fn scan_port(port: u16) -> Result<Vec<PortProcess>, String> {
+    use std::process::Command;
+
+    let output = Command::new("netstat")
+        .args(["-ano"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut processes: Vec<PortProcess> = Vec::new();
+    let mut seen_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
+    for line in stdout.lines() {
+        // Parse lines like: TCP    0.0.0.0:3000    0.0.0.0:0    LISTENING    12345
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let protocol = parts[0];
+            let local_addr = parts[1];
+
+            // Check if this is TCP or UDP
+            if protocol != "TCP" && protocol != "UDP" {
+                continue;
+            }
+
+            // Parse the port from local address (format: IP:PORT or [IPv6]:PORT)
+            let port_str = if local_addr.contains('[') {
+                // IPv6: [::]:port
+                local_addr.rsplit(':').next()
+            } else {
+                // IPv4: 0.0.0.0:port
+                local_addr.rsplit(':').next()
+            };
+
+            if let Some(port_str) = port_str {
+                if let Ok(local_port) = port_str.parse::<u16>() {
+                    if local_port == port {
+                        // Get PID (last column for TCP, different for UDP)
+                        let pid_str = if protocol == "TCP" && parts.len() >= 5 {
+                            parts[4]
+                        } else if protocol == "UDP" && parts.len() >= 4 {
+                            parts[3]
+                        } else {
+                            continue;
+                        };
+
+                        if let Ok(pid) = pid_str.parse::<u32>() {
+                            if pid == 0 || seen_pids.contains(&pid) {
+                                continue;
+                            }
+                            seen_pids.insert(pid);
+
+                            // Get process name using tasklist
+                            let process_name = get_process_name(pid).unwrap_or_else(|| "Unknown".to_string());
+
+                            processes.push(PortProcess {
+                                pid,
+                                name: process_name,
+                                port: local_port,
+                                protocol: protocol.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(processes)
+}
+
+fn get_process_name(pid: u32) -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+
+    // Parse CSV: "process.exe","12345",...
+    let parts: Vec<&str> = line.split(',').collect();
+    if !parts.is_empty() {
+        let name = parts[0].trim_matches('"');
+        return Some(name.to_string());
+    }
+
+    None
+}
+
+#[tauri::command]
+async fn kill_port_process(pid: u32) -> Result<(), String> {
+    use std::process::Command;
+
+    let output = Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to kill process: {}", stderr));
+    }
+
+    Ok(())
+}
+
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -660,7 +778,9 @@ pub fn run() {
             set_dragging,
             save_window_position,
             convert_image,
-            convert_media
+            convert_media,
+            scan_port,
+            kill_port_process
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
