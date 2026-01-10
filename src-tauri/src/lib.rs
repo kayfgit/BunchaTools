@@ -627,6 +627,56 @@ async fn kill_port_process(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+// Currency conversion response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyResult {
+    pub amount: f64,
+    pub from: String,
+    pub to: String,
+    pub result: f64,
+    pub rate: f64,
+}
+
+#[tauri::command]
+async fn convert_currency(amount: f64, from: String, to: String) -> Result<CurrencyResult, String> {
+    // Use frankfurter.app - free, no API key required
+    let url = format!(
+        "https://api.frankfurter.app/latest?amount={}&from={}&to={}",
+        amount,
+        from.to_uppercase(),
+        to.to_uppercase()
+    );
+
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Failed to fetch rates: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+
+    let data: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let to_upper = to.to_uppercase();
+    let result_value = data["rates"][&to_upper]
+        .as_f64()
+        .ok_or_else(|| format!("Currency '{}' not found", to_upper))?;
+
+    // Calculate the rate (1 unit of source currency)
+    let rate = result_value / amount;
+
+    Ok(CurrencyResult {
+        amount,
+        from: from.to_uppercase(),
+        to: to_upper,
+        result: result_value,
+        rate,
+    })
+}
+
 fn toggle_window(app: &AppHandle) {
     // Check if window is ready before attempting to toggle
     let state = app.state::<AppState>();
@@ -802,7 +852,8 @@ pub fn run() {
             convert_image,
             convert_media,
             scan_port,
-            kill_port_process
+            kill_port_process,
+            convert_currency
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

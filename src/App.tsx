@@ -26,6 +26,7 @@ const RESULTS_HEIGHT = 340;
 const SETTINGS_HEIGHT = 280;
 const CONVERTER_HEIGHT = 450;
 const PORT_KILLER_HEIGHT = 450;
+const CURRENCY_HEIGHT = 400;
 
 // Format options for converter
 const FORMAT_OPTIONS = {
@@ -57,6 +58,69 @@ interface PortProcess {
 }
 
 const COMMON_PORTS = [3000, 3001, 5173, 8080, 8000, 4200, 5000, 1420];
+
+// Currency conversion
+interface CurrencyResult {
+  amount: number;
+  from: string;
+  to: string;
+  result: number;
+  rate: number;
+}
+
+interface CurrencyQuery {
+  amount: number;
+  from: string;
+  to: string;
+}
+
+// Common currency aliases
+const CURRENCY_ALIASES: Record<string, string> = {
+  // Names to codes
+  dollar: "USD", dollars: "USD", usd: "USD",
+  euro: "EUR", euros: "EUR", eur: "EUR",
+  pound: "GBP", pounds: "GBP", gbp: "GBP", sterling: "GBP",
+  yen: "JPY", jpy: "JPY",
+  yuan: "CNY", cny: "CNY", rmb: "CNY", renminbi: "CNY",
+  won: "KRW", krw: "KRW",
+  rupee: "INR", rupees: "INR", inr: "INR",
+  franc: "CHF", francs: "CHF", chf: "CHF",
+  real: "BRL", reais: "BRL", brl: "BRL",
+  peso: "MXN", pesos: "MXN", mxn: "MXN",
+  ruble: "RUB", rubles: "RUB", rub: "RUB",
+  lira: "TRY", try: "TRY",
+  rand: "ZAR", zar: "ZAR",
+  krona: "SEK", kronor: "SEK", sek: "SEK",
+  krone: "NOK", kroner: "NOK", nok: "NOK",
+  // Direct codes
+  aud: "AUD", cad: "CAD", nzd: "NZD", sgd: "SGD", hkd: "HKD",
+  dkk: "DKK", pln: "PLN", czk: "CZK", huf: "HUF", ils: "ILS",
+  thb: "THB", myr: "MYR", php: "PHP", idr: "IDR",
+};
+
+// Parse currency query like "20 usd in yen" or "100 eur to usd"
+function parseCurrencyQuery(query: string): CurrencyQuery | null {
+  const cleaned = query.toLowerCase().trim();
+
+  // Pattern: <amount> <currency> (in|to) <currency>
+  const match = cleaned.match(/^([\d.,]+)\s*([a-z]+)\s+(?:in|to)\s+([a-z]+)$/);
+  if (!match) return null;
+
+  const amount = parseFloat(match[1].replace(",", "."));
+  if (isNaN(amount) || amount <= 0) return null;
+
+  const fromInput = match[2];
+  const toInput = match[3];
+
+  const from = CURRENCY_ALIASES[fromInput] || fromInput.toUpperCase();
+  const to = CURRENCY_ALIASES[toInput] || toInput.toUpperCase();
+
+  // Basic validation - currency codes are 3 letters
+  if (from.length !== 3 || to.length !== 3) return null;
+  if (from === to) return null;
+
+  return { amount, from, to };
+}
 
 // Safe calculator function that evaluates basic math expressions
 function evaluateExpression(expr: string): string | null {
@@ -133,6 +197,13 @@ function App() {
   const [portProcesses, setPortProcesses] = useState<PortProcess[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scannedPort, setScannedPort] = useState<number | null>(null);
+
+  // Currency converter state
+  const [currencyResult, setCurrencyResult] = useState<CurrencyResult | null>(null);
+  const [currencyLoading, setCurrencyLoading] = useState(false);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
+  const [lastCurrencyQuery, setLastCurrencyQuery] = useState<string>("");
+  const [currencyUpdatedAt, setCurrencyUpdatedAt] = useState<Date | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -238,6 +309,9 @@ function App() {
       setPortInput("");
       setPortProcesses([]);
       setScannedPort(null);
+      setCurrencyResult(null);
+      setCurrencyError(null);
+      setLastCurrencyQuery("");
       inputRef.current?.focus();
     });
 
@@ -252,6 +326,9 @@ function App() {
     if (query.trim() === "") {
       setFilteredTools([]);
       setSelectedIndex(0);
+      setCurrencyResult(null);
+      setCurrencyError(null);
+      setLastCurrencyQuery("");
     } else {
       const q = query.toLowerCase();
       const filtered = tools.filter(
@@ -262,6 +339,32 @@ function App() {
       );
       setFilteredTools(filtered);
       setSelectedIndex(0);
+
+      // Check for currency query
+      const currencyQuery = parseCurrencyQuery(query);
+      if (currencyQuery && query !== lastCurrencyQuery) {
+        setLastCurrencyQuery(query);
+        setCurrencyLoading(true);
+        setCurrencyError(null);
+        invoke<CurrencyResult>("convert_currency", {
+          amount: currencyQuery.amount,
+          from: currencyQuery.from,
+          to: currencyQuery.to,
+        })
+          .then((result) => {
+            setCurrencyResult(result);
+            setCurrencyUpdatedAt(new Date());
+            setCurrencyLoading(false);
+          })
+          .catch((err) => {
+            setCurrencyError(String(err));
+            setCurrencyResult(null);
+            setCurrencyLoading(false);
+          });
+      } else if (!currencyQuery) {
+        setCurrencyResult(null);
+        setCurrencyError(null);
+      }
     }
   }, [query]);
 
@@ -277,6 +380,8 @@ function App() {
         newHeight = PORT_KILLER_HEIGHT;
       } else if (showSettings) {
         newHeight = SETTINGS_HEIGHT;
+      } else if (currencyResult || currencyLoading) {
+        newHeight = CURRENCY_HEIGHT;
       } else if (query.length > 0) {
         newHeight = RESULTS_HEIGHT;
       }
@@ -284,7 +389,7 @@ function App() {
       await appWindow.setSize(new LogicalSize(680, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0, showSettings, showConverter, showPortKiller]);
+  }, [query.length > 0, showSettings, showConverter, showPortKiller, currencyResult, currencyLoading]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -381,8 +486,38 @@ function App() {
   };
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
-  const showResults = query.length > 0 && !showSettings && !showConverter && !showPortKiller;
+  const showCurrency = (currencyResult || currencyLoading) && !showSettings && !showConverter && !showPortKiller;
+  const showResults = query.length > 0 && !showSettings && !showConverter && !showPortKiller && !showCurrency;
   const calculatorResult = query ? evaluateExpression(query) : null;
+
+  // Format time ago for currency update
+  const getTimeAgo = (date: Date | null) => {
+    if (!date) return "";
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return "Updated just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes === 1) return "Updated 1 minute ago";
+    return `Updated ${minutes} minutes ago`;
+  };
+
+  // Refresh currency rate
+  const refreshCurrency = async () => {
+    if (!currencyResult) return;
+    setCurrencyLoading(true);
+    try {
+      const result = await invoke<CurrencyResult>("convert_currency", {
+        amount: currencyResult.amount,
+        from: currencyResult.from,
+        to: currencyResult.to,
+      });
+      setCurrencyResult(result);
+      setCurrencyUpdatedAt(new Date());
+    } catch (err) {
+      setCurrencyError(String(err));
+    } finally {
+      setCurrencyLoading(false);
+    }
+  };
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -522,7 +657,7 @@ function App() {
       {!showConverter && !showPortKiller && (
         <div
           className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
-            showResults || showSettings ? "rounded-t-buncha" : "rounded-buncha"
+            showResults || showSettings || showCurrency ? "rounded-t-buncha" : "rounded-buncha"
           }`}
           onMouseDown={handleDragStart}
         >
@@ -660,6 +795,89 @@ function App() {
                 Save Settings
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Currency Conversion Panel */}
+      {showCurrency && (
+        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+          <div className="p-4">
+            {currencyLoading && !currencyResult ? (
+              <div className="flex items-center justify-center py-8">
+                <svg className="w-6 h-6 animate-spin text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                </svg>
+              </div>
+            ) : currencyError ? (
+              <div className="text-center py-8">
+                <div className="text-red-400 text-sm">{currencyError}</div>
+              </div>
+            ) : currencyResult && (
+              <>
+                {/* From section */}
+                <div className="text-buncha-text-muted text-sm mb-2">From</div>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
+                    <span className="text-buncha-text text-lg">{currencyResult.amount.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
+                    <span className="text-buncha-text font-medium">{currencyResult.from}</span>
+                  </div>
+                </div>
+
+                {/* Arrow */}
+                <div className="flex justify-center my-2">
+                  <div className="w-8 h-8 rounded-full bg-buncha-surface border border-buncha-border flex items-center justify-center">
+                    <svg className="w-4 h-4 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 5v14M19 12l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* To section */}
+                <div className="text-buncha-text-muted text-sm mb-2">To</div>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
+                    <span className="text-buncha-accent text-lg font-medium">
+                      {currencyResult.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
+                    <span className="text-buncha-text font-medium">{currencyResult.to}</span>
+                  </div>
+                </div>
+
+                {/* Rate info */}
+                <div className="flex items-center justify-between p-3 bg-buncha-surface rounded-lg border border-buncha-border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-buncha-accent/20 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                        <path d="M17 6h6v6" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-buncha-text text-sm">
+                        1 {currencyResult.from} = {currencyResult.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {currencyResult.to}
+                      </div>
+                      <div className="text-buncha-text-muted text-xs">{getTimeAgo(currencyUpdatedAt)}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={refreshCurrency}
+                    disabled={currencyLoading}
+                    className="text-buncha-text-muted hover:text-buncha-text cursor-pointer disabled:opacity-50"
+                  >
+                    <svg className={`w-5 h-5 ${currencyLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M23 4v6h-6M1 20v-6h6" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
