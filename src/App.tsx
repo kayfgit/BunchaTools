@@ -21,11 +21,11 @@ interface Settings {
   launch_at_startup: boolean;
 }
 
-const BASE_HEIGHT = 60;
-const RESULTS_HEIGHT = 300;
-const SETTINGS_HEIGHT = 250;
-const CONVERTER_HEIGHT = 400;
-const PORT_KILLER_HEIGHT = 400;
+const BASE_HEIGHT = 70;
+const RESULTS_HEIGHT = 340;
+const SETTINGS_HEIGHT = 280;
+const CONVERTER_HEIGHT = 450;
+const PORT_KILLER_HEIGHT = 450;
 
 // Format options for converter
 const FORMAT_OPTIONS = {
@@ -195,17 +195,21 @@ function App() {
     },
   ];
 
-  // Load settings on mount
+  // Mark window ready and load settings on mount
   useEffect(() => {
-    const loadSettings = async () => {
+    const initialize = async () => {
       try {
+        // Mark window as ready first - this enables hotkey and tray interactions
+        await invoke("mark_window_ready");
+
+        // Then load settings
         const s = await invoke<Settings>("get_settings");
         setSettings(s);
       } catch (e) {
-        console.error("Failed to load settings:", e);
+        console.error("Failed to initialize:", e);
       }
     };
-    loadSettings();
+    initialize();
   }, []);
 
   // Listen for conversion progress events
@@ -277,7 +281,7 @@ function App() {
         newHeight = RESULTS_HEIGHT;
       }
 
-      await appWindow.setSize(new LogicalSize(600, newHeight));
+      await appWindow.setSize(new LogicalSize(680, newHeight));
     };
     resizeWindow();
   }, [query.length > 0, showSettings, showConverter, showPortKiller]);
@@ -514,86 +518,77 @@ function App() {
 
   return (
     <div className="p-2">
-      {/* Search Bar */}
-      <div
-        className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
-          showResults || showSettings || showConverter ? "rounded-t-buncha" : "rounded-buncha"
-        }`}
-        onMouseDown={handleDragStart}
-      >
-        <div className="flex items-center px-4 py-3 cursor-default">
-          <svg
-            className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
-          <input
-            ref={inputRef}
-            type="text"
-            value={showPortKiller ? "Port Killer" : showConverter ? "Omni Converter" : showSettings ? "Settings" : query}
-            onChange={(e) => !showSettings && !showConverter && !showPortKiller && setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={status || "Search for tools..."}
-            readOnly={showSettings || showConverter || showPortKiller}
-            className={`bg-transparent text-base outline-none ${
-              calculatorResult ? "" : "flex-1"
-            } ${
-              status
-                ? "text-buncha-accent placeholder-buncha-accent"
-                : "text-buncha-text placeholder-buncha-text-muted"
-            } ${showSettings || showConverter || showPortKiller ? "cursor-default" : ""}`}
-            style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
-            autoFocus
-          />
-          {calculatorResult && (
-            <span className="text-buncha-text-muted text-base whitespace-nowrap flex-1 ml-1">
-              = {calculatorResult}
-            </span>
-          )}
-          {(query || showSettings || showConverter || showPortKiller) && (
-            <button
-              onClick={async () => {
-                if (showConverter || showPortKiller) {
-                  await invoke("set_auto_hide", { enabled: true });
-                }
-                setQuery("");
-                setShowSettings(false);
-                setShowConverter(false);
-                setConverterType(null);
-                setSelectedFile(null);
-                setTargetFormat(null);
-                setShowPortKiller(false);
-                setPortInput("");
-                setPortProcesses([]);
-                setScannedPort(null);
-              }}
-              className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
+      {/* Search Bar - Hidden when tools are open */}
+      {!showConverter && !showPortKiller && (
+        <div
+          className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
+            showResults || showSettings ? "rounded-t-buncha" : "rounded-buncha"
+          }`}
+          onMouseDown={handleDragStart}
+        >
+          <div className="flex items-center px-4 py-3 cursor-default">
+            <svg
+              className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            <input
+              ref={inputRef}
+              type="text"
+              value={showSettings ? "Settings" : query}
+              onChange={(e) => !showSettings && setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={status || "Search for tools..."}
+              readOnly={showSettings}
+              className={`bg-transparent text-base outline-none ${
+                calculatorResult ? "" : "flex-1"
+              } ${
+                status
+                  ? "text-buncha-accent placeholder-buncha-accent"
+                  : "text-buncha-text placeholder-buncha-text-muted"
+              } ${showSettings ? "cursor-default" : ""}`}
+              style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
+              autoFocus
+            />
+            {calculatorResult && (
+              <span className="text-buncha-text-muted text-base whitespace-nowrap flex-1 ml-1">
+                = {calculatorResult}
+              </span>
+            )}
+            {(query || showSettings) && (
+              <button
+                onClick={async () => {
+                  setQuery("");
+                  setShowSettings(false);
+                }}
+                className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Settings Panel */}
       {showSettings && (
@@ -671,7 +666,28 @@ function App() {
 
       {/* Converter Panel */}
       {showConverter && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+        <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
+          {/* Tool Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+            <div className="flex items-center">
+              <span className="text-xl mr-3">🔄</span>
+              <span className="text-buncha-text text-base font-medium">Omni Converter</span>
+            </div>
+            <button
+              onClick={async () => {
+                await invoke("set_auto_hide", { enabled: true });
+                setShowConverter(false);
+                setConverterType(null);
+                setSelectedFile(null);
+                setTargetFormat(null);
+              }}
+              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <div className="p-4">
             {/* Type Selection View */}
             {!converterType && (
@@ -882,7 +898,28 @@ function App() {
 
       {/* Port Killer Panel */}
       {showPortKiller && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+        <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
+          {/* Tool Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+            <div className="flex items-center">
+              <span className="text-xl mr-3">🔌</span>
+              <span className="text-buncha-text text-base font-medium">Port Killer</span>
+            </div>
+            <button
+              onClick={async () => {
+                await invoke("set_auto_hide", { enabled: true });
+                setShowPortKiller(false);
+                setPortInput("");
+                setPortProcesses([]);
+                setScannedPort(null);
+              }}
+              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <div className="p-4">
             {/* Port Input */}
             <div className="text-buncha-text text-sm font-medium mb-3">Enter port number</div>
@@ -996,7 +1033,7 @@ function App() {
 
       {/* Search Results */}
       {showResults && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl max-h-60 overflow-y-auto">
+        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl max-h-60 overflow-y-auto scrollbar-hidden">
           {filteredTools.length > 0 ? (
             <div className="py-2">
               <div className="px-4 py-1 text-xs text-buncha-text-muted uppercase tracking-wider">

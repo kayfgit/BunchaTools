@@ -52,6 +52,7 @@ struct AppState {
     settings: Mutex<Settings>,
     auto_hide_enabled: Mutex<bool>,
     is_dragging: Mutex<bool>,
+    window_ready: Mutex<bool>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -251,6 +252,13 @@ fn set_auto_hide(app: AppHandle, enabled: bool) {
 fn set_dragging(app: AppHandle, dragging: bool) {
     let state = app.state::<AppState>();
     *state.is_dragging.lock().unwrap() = dragging;
+}
+
+#[tauri::command]
+fn mark_window_ready(app: AppHandle) {
+    let state = app.state::<AppState>();
+    *state.window_ready.lock().unwrap() = true;
+    log::info!("Window marked as ready");
 }
 
 #[tauri::command]
@@ -620,12 +628,19 @@ async fn kill_port_process(pid: u32) -> Result<(), String> {
 }
 
 fn toggle_window(app: &AppHandle) {
+    // Check if window is ready before attempting to toggle
+    let state = app.state::<AppState>();
+    let is_ready = *state.window_ready.lock().unwrap();
+    if !is_ready {
+        log::warn!("Window not ready yet, ignoring toggle request");
+        return;
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
             // Check for saved position
-            let state = app.state::<AppState>();
             let settings = state.settings.lock().unwrap();
             if let Some((x, y)) = settings.window_position {
                 use tauri::LogicalPosition;
@@ -638,6 +653,8 @@ fn toggle_window(app: &AppHandle) {
             let _ = window.set_focus();
             let _ = app.emit("focus-search", ());
         }
+    } else {
+        log::warn!("Main window not found");
     }
 }
 
@@ -651,6 +668,7 @@ pub fn run() {
             settings: Mutex::new(Settings::default()),
             auto_hide_enabled: Mutex::new(true),
             is_dragging: Mutex::new(false),
+            window_ready: Mutex::new(false),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -737,33 +755,36 @@ pub fn run() {
                 *state.current_shortcut.lock().unwrap() = Some(shortcut);
             }
 
-            // Handle window events
-            let window = app.get_webview_window("main").unwrap();
-            let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
+            // Handle window events - use if let to avoid panic if window isn't ready
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
 
-            let window_clone = window.clone();
-            let app_handle_for_blur = app.handle().clone();
-            window.on_window_event(move |event| {
-                match event {
-                    tauri::WindowEvent::Focused(false) => {
-                        let state = app_handle_for_blur.state::<AppState>();
-                        let auto_hide = *state.auto_hide_enabled.lock().unwrap();
-                        let is_dragging = *state.is_dragging.lock().unwrap();
-                        // Don't hide if dragging or auto_hide is disabled
-                        if auto_hide && !is_dragging {
-                            let _ = window_clone.hide();
+                let window_clone = window.clone();
+                let app_handle_for_blur = app.handle().clone();
+                window.on_window_event(move |event| {
+                    match event {
+                        tauri::WindowEvent::Focused(false) => {
+                            let state = app_handle_for_blur.state::<AppState>();
+                            let auto_hide = *state.auto_hide_enabled.lock().unwrap();
+                            let is_dragging = *state.is_dragging.lock().unwrap();
+                            // Don't hide if dragging or auto_hide is disabled
+                            if auto_hide && !is_dragging {
+                                let _ = window_clone.hide();
+                            }
                         }
+                        tauri::WindowEvent::Moved(position) => {
+                            // Save position when window is moved
+                            let state = app_handle_for_blur.state::<AppState>();
+                            let mut settings = state.settings.lock().unwrap();
+                            settings.window_position = Some((position.x, position.y));
+                            let _ = save_settings_to_file(&app_handle_for_blur, &settings);
+                        }
+                        _ => {}
                     }
-                    tauri::WindowEvent::Moved(position) => {
-                        // Save position when window is moved
-                        let state = app_handle_for_blur.state::<AppState>();
-                        let mut settings = state.settings.lock().unwrap();
-                        settings.window_position = Some((position.x, position.y));
-                        let _ = save_settings_to_file(&app_handle_for_blur, &settings);
-                    }
-                    _ => {}
-                }
-            });
+                });
+            } else {
+                log::error!("Failed to get main window during setup");
+            }
 
             Ok(())
         })
@@ -776,6 +797,7 @@ pub fn run() {
             get_launch_at_startup,
             set_auto_hide,
             set_dragging,
+            mark_window_ready,
             save_window_position,
             convert_image,
             convert_media,
