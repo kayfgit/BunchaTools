@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText, readText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 interface Tool {
@@ -27,6 +27,7 @@ const SETTINGS_HEIGHT = 280;
 const CONVERTER_HEIGHT = 450;
 const PORT_KILLER_HEIGHT = 450;
 const CURRENCY_HEIGHT = 400;
+const TRANSLATION_HEIGHT = 380;
 
 // Format options for converter
 const FORMAT_OPTIONS = {
@@ -72,6 +73,12 @@ interface CurrencyQuery {
   amount: number;
   from: string;
   to: string;
+}
+
+interface TranslationResult {
+  translated_text: string;
+  detected_language: string;
+  target_language: string;
 }
 
 // Common currency aliases
@@ -205,6 +212,15 @@ function App() {
   const [lastCurrencyQuery, setLastCurrencyQuery] = useState<string>("");
   const [currencyUpdatedAt, setCurrencyUpdatedAt] = useState<Date | null>(null);
 
+  // Quick Translation state
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [translationInput, setTranslationInput] = useState("");
+  const [translationOutput, setTranslationOutput] = useState("");
+  const [detectedLanguage, setDetectedLanguage] = useState("Detecting...");
+  const [targetLanguage] = useState("en");
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+
   // Define tools
   const tools: Tool[] = [
     {
@@ -264,6 +280,61 @@ function App() {
         setQuery("");
       },
     },
+    {
+      id: "quick-translation",
+      name: "Quick Translation",
+      description: "Translate text between languages instantly",
+      icon: "🌐",
+      keywords: ["translate", "translation", "language", "japanese", "english", "spanish", "french", "german", "chinese", "korean"],
+      action: async () => {
+        setQuery("");
+        // Reset translation state
+        setTranslationInput("");
+        setTranslationOutput("");
+        setDetectedLanguage("Detecting...");
+        setTranslationError(null);
+        setIsTranslating(false);
+
+        try {
+          // Start text selection mode - window hides, cursor changes to I-beam
+          // User selects text, Ctrl+C is simulated, window shows after mouse release
+          await invoke("start_text_selection");
+
+          // Read the copied text from clipboard
+          const clipboardText = await readText();
+
+          if (clipboardText && clipboardText.trim()) {
+            setTranslationInput(clipboardText);
+            setShowTranslation(true);
+
+            // Start translation immediately
+            setIsTranslating(true);
+            try {
+              const result = await invoke<TranslationResult>("translate_text", {
+                text: clipboardText,
+                targetLang: targetLanguage,
+              });
+              setTranslationOutput(result.translated_text);
+              setDetectedLanguage(result.detected_language);
+              setIsTranslating(false);
+            } catch (translationErr) {
+              setTranslationError(String(translationErr));
+              setIsTranslating(false);
+            }
+          } else {
+            // No text was selected/copied
+            setShowTranslation(true);
+            setTranslationInput("");
+            setDetectedLanguage("No text selected");
+          }
+        } catch (e) {
+          // User cancelled (pressed Escape), don't show translation window
+          if (e !== "Cancelled") {
+            console.error("Text selection error:", e);
+          }
+        }
+      },
+    },
   ];
 
   // Mark window ready and load settings on mount
@@ -312,6 +383,11 @@ function App() {
       setCurrencyResult(null);
       setCurrencyError(null);
       setLastCurrencyQuery("");
+      setShowTranslation(false);
+      setTranslationInput("");
+      setTranslationOutput("");
+      setDetectedLanguage("Detecting...");
+      setTranslationError(null);
       inputRef.current?.focus();
     });
 
@@ -378,6 +454,8 @@ function App() {
         newHeight = CONVERTER_HEIGHT;
       } else if (showPortKiller) {
         newHeight = PORT_KILLER_HEIGHT;
+      } else if (showTranslation) {
+        newHeight = TRANSLATION_HEIGHT;
       } else if (showSettings) {
         newHeight = SETTINGS_HEIGHT;
       } else if (currencyResult || currencyLoading) {
@@ -389,7 +467,7 @@ function App() {
       await appWindow.setSize(new LogicalSize(680, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0, showSettings, showConverter, showPortKiller, currencyResult, currencyLoading]);
+  }, [query.length > 0, showSettings, showConverter, showPortKiller, showTranslation, currencyResult, currencyLoading]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -415,13 +493,15 @@ function App() {
         setPortInput("");
         setPortProcesses([]);
         setScannedPort(null);
+      } else if (showTranslation) {
+        setShowTranslation(false);
       } else if (showSettings) {
         setShowSettings(false);
       } else {
         invoke("hide_window");
         setQuery("");
       }
-    } else if (!showSettings && !showConverter && !showPortKiller) {
+    } else if (!showSettings && !showConverter && !showPortKiller && !showTranslation) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -654,7 +734,7 @@ function App() {
   return (
     <div className="p-2">
       {/* Search Bar - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && (
+      {!showConverter && !showPortKiller && !showTranslation && (
         <div
           className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
             showResults || showSettings || showCurrency ? "rounded-t-buncha" : "rounded-buncha"
@@ -1244,6 +1324,108 @@ function App() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Translation Panel */}
+      {showTranslation && (
+        <div className="bg-[#121212] border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
+          {/* Header with close button */}
+          <div className="border-b-buncha-border border-b flex items-center justify-between px-4 py-3 cursor-default">
+            <div className="flex items-center">
+              <span className="text-xl mr-3">🌐</span>
+              <span className="text-buncha-text text-base font-medium">Quick Translation</span>
+            </div>
+            <button
+              onClick={() => setShowTranslation(false)}
+              className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="px-6 py-4">
+            {/* Source Language Section */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-buncha-accent text-xs font-medium tracking-wider uppercase">
+                  {detectedLanguage}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => translationInput && writeText(translationInput)}
+                    className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+                    title="Copy source text"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="text-buncha-text text-lg min-h-[28px]">
+                {translationInput || <span className="text-buncha-text-muted italic">No text selected</span>}
+              </div>
+            </div>
+
+            {/* Arrow Divider */}
+            <div className="flex items-center">
+              <div className="grow border-t border-buncha-border"/>
+              <div className="flex justify-center mx-4 my-4">
+                {isTranslating ? (
+                  <svg className="w-5 h-5 animate-spin text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14M19 12l-7 7-7-7" />
+                  </svg>
+                )}
+              </div>
+              <div className="grow border-t border-buncha-border"/>
+            </div>
+
+            {/* Target Language Section */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-buncha-accent text-xs font-medium tracking-wider uppercase">ENGLISH</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => translationOutput && writeText(translationOutput)}
+                    className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+                    title="Copy translation"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="text-buncha-text text-lg min-h-[28px]">
+                {translationError ? (
+                  <span className="text-red-400">{translationError}</span>
+                ) : isTranslating ? (
+                  <span className="text-buncha-text-muted italic">Translating...</span>
+                ) : translationOutput ? (
+                  translationOutput
+                ) : (
+                  <span className="text-buncha-text-muted italic">Translation will appear here</span>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-buncha-border">
+              <p className="text-xs text-buncha-text-muted text-center">
+                Translation powered by Lingva Translate
+              </p>
             </div>
           </div>
         </div>

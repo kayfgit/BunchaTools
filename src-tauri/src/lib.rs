@@ -13,10 +13,10 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use windows::Win32::{
     Foundation::POINT,
     Graphics::Gdi::{GetDC, GetPixel, ReleaseDC},
-    UI::Input::KeyboardAndMouse::GetAsyncKeyState,
+    UI::Input::KeyboardAndMouse::{GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_C, VK_CONTROL},
     UI::WindowsAndMessaging::{
         CopyIcon, GetCursorPos, LoadCursorW, SetSystemCursor, SystemParametersInfoW, HCURSOR,
-        HICON, IDC_CROSS, OCR_NORMAL, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
+        HICON, IDC_CROSS, IDC_IBEAM, OCR_NORMAL, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
     },
 };
 
@@ -677,6 +677,279 @@ async fn convert_currency(amount: f64, from: String, to: String) -> Result<Curre
     })
 }
 
+#[cfg(windows)]
+#[tauri::command]
+async fn start_text_selection(window: tauri::Window) -> Result<(), String> {
+    // Hide the window first
+    let _ = window.hide();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Set the cursor to I-beam (text selection cursor)
+    unsafe {
+        let ibeam_cursor = LoadCursorW(None, IDC_IBEAM).map_err(|e| e.to_string())?;
+        let cursor_copy = CopyIcon(HICON(ibeam_cursor.0)).map_err(|e| e.to_string())?;
+        let _ = SetSystemCursor(HCURSOR(cursor_copy.0), OCR_NORMAL);
+    }
+
+    let restore_cursors = || unsafe {
+        let _ = SystemParametersInfoW(
+            SYSTEM_PARAMETERS_INFO_ACTION(SPI_SETCURSORS.0),
+            0,
+            None,
+            Default::default(),
+        );
+    };
+
+    const VK_LBUTTON: i32 = 0x01;
+    const VK_ESCAPE: i32 = 0x1B;
+
+    // Wait for any existing mouse button press to be released first
+    loop {
+        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
+        if state >= 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Wait for mouse button to be pressed (user starts selecting)
+    loop {
+        let escape_state = unsafe { GetAsyncKeyState(VK_ESCAPE) };
+        if escape_state < 0 {
+            restore_cursors();
+            return Err("Cancelled".to_string());
+        }
+
+        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
+        if state < 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Wait for mouse button to be released (user finishes selecting)
+    loop {
+        let escape_state = unsafe { GetAsyncKeyState(VK_ESCAPE) };
+        if escape_state < 0 {
+            restore_cursors();
+            return Err("Cancelled".to_string());
+        }
+
+        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
+        if state >= 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Restore cursors
+    restore_cursors();
+
+    // Small delay to ensure selection is complete
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Simulate Ctrl+C to copy selected text
+    unsafe {
+        let mut inputs: [INPUT; 4] = std::mem::zeroed();
+
+        // Ctrl down
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_CONTROL,
+            wScan: 0,
+            dwFlags: Default::default(),
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // C down
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_C,
+            wScan: 0,
+            dwFlags: Default::default(),
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // C up
+        inputs[2].r#type = INPUT_KEYBOARD;
+        inputs[2].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_C,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // Ctrl up
+        inputs[3].r#type = INPUT_KEYBOARD;
+        inputs[3].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_CONTROL,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+
+    // Wait for clipboard to be populated
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Show the window
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn start_text_selection(_window: tauri::Window) -> Result<(), String> {
+    Err("Text selection is only supported on Windows".to_string())
+}
+
+// Translation result structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslationResult {
+    pub translated_text: String,
+    pub detected_language: String,
+    pub target_language: String,
+}
+
+// Lingva Translate API response structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LingvaResponse {
+    translation: String,
+    info: Option<LingvaInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LingvaInfo {
+    source: Option<LingvaSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LingvaSource {
+    detected: Option<LingvaDetected>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LingvaDetected {
+    code: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LingvaError {
+    error: String,
+}
+
+// Language code to name mapping (fallback if API doesn't provide name)
+fn get_language_name(code: &str) -> String {
+    match code.to_lowercase().as_str() {
+        "en" => "English".to_string(),
+        "ja" => "Japanese".to_string(),
+        "es" => "Spanish".to_string(),
+        "fr" => "French".to_string(),
+        "de" => "German".to_string(),
+        "zh" => "Chinese".to_string(),
+        "ko" => "Korean".to_string(),
+        "pt" => "Portuguese".to_string(),
+        "ru" => "Russian".to_string(),
+        "it" => "Italian".to_string(),
+        "ar" => "Arabic".to_string(),
+        "hi" => "Hindi".to_string(),
+        "nl" => "Dutch".to_string(),
+        "pl" => "Polish".to_string(),
+        "tr" => "Turkish".to_string(),
+        "vi" => "Vietnamese".to_string(),
+        "th" => "Thai".to_string(),
+        "id" => "Indonesian".to_string(),
+        "uk" => "Ukrainian".to_string(),
+        "cs" => "Czech".to_string(),
+        "el" => "Greek".to_string(),
+        "he" => "Hebrew".to_string(),
+        "sv" => "Swedish".to_string(),
+        "da" => "Danish".to_string(),
+        "fi" => "Finnish".to_string(),
+        "no" => "Norwegian".to_string(),
+        "hu" => "Hungarian".to_string(),
+        "ro" => "Romanian".to_string(),
+        "sk" => "Slovak".to_string(),
+        "bg" => "Bulgarian".to_string(),
+        _ => code.to_uppercase(),
+    }
+}
+
+#[tauri::command]
+async fn translate_text(text: String, target_lang: String) -> Result<TranslationResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // URL encode the text
+    let encoded_text = urlencoding::encode(&text);
+
+    // List of Lingva instances to try (with fallbacks)
+    let instances = [
+        "lingva.ml",
+        "lingva.lunar.icu",
+        "translate.plausibility.cloud",
+    ];
+
+    let mut last_error = String::from("All translation servers failed");
+
+    for instance in instances {
+        let url = format!(
+            "https://{}/api/v1/auto/{}/{}",
+            instance, target_lang, encoded_text
+        );
+
+        match client.get(&url).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.json::<LingvaResponse>().await {
+                        Ok(data) => {
+                            // Extract detected language info
+                            let detected_lang = data
+                                .info
+                                .and_then(|i| i.source)
+                                .and_then(|s| s.detected)
+                                .map(|d| d.name)
+                                .unwrap_or_else(|| "Auto-detected".to_string());
+
+                            return Ok(TranslationResult {
+                                translated_text: data.translation,
+                                detected_language: detected_lang,
+                                target_language: get_language_name(&target_lang),
+                            });
+                        }
+                        Err(e) => {
+                            last_error = format!("Failed to parse response from {}: {}", instance, e);
+                        }
+                    }
+                } else {
+                    // Try to get error message
+                    if let Ok(err) = response.json::<LingvaError>().await {
+                        last_error = format!("{}: {}", instance, err.error);
+                    } else {
+                        last_error = format!("{} returned error status", instance);
+                    }
+                }
+            }
+            Err(e) => {
+                last_error = format!("Failed to connect to {}: {}", instance, e);
+            }
+        }
+    }
+
+    Err(last_error)
+}
+
 fn toggle_window(app: &AppHandle) {
     // Check if window is ready before attempting to toggle
     let state = app.state::<AppState>();
@@ -853,7 +1126,9 @@ pub fn run() {
             convert_media,
             scan_port,
             kill_port_process,
-            convert_currency
+            convert_currency,
+            start_text_selection,
+            translate_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
