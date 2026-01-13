@@ -672,10 +672,11 @@ function App() {
     }
   };
 
-  // Handle window dragging
+  // Handle window dragging - only drag from elements with data-drag-region
   const handleDragStart = async (e: React.MouseEvent) => {
-    // Only start drag if clicking on the drag handle area (not on inputs/buttons)
-    if ((e.target as HTMLElement).closest('input, button, [data-no-drag]')) return;
+    // Only start drag if clicking directly on a drag region (not on buttons inside it)
+    const target = e.target as HTMLElement;
+    if (!target.closest('[data-drag-region]') || target.closest('button, input')) return;
 
     // Set dragging flag to prevent auto-hide during drag
     await invoke("set_dragging", { dragging: true });
@@ -774,15 +775,15 @@ function App() {
   };
 
   return (
-    <div className="p-2">
+    <div className="p-2 select-none">
       {/* Command Palette - Hidden when tools are open */}
       {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showCurrency && (
         <div
-          className="bg-buncha-bg/95 backdrop-blur-xl border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
+          className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
           onMouseDown={handleDragStart}
         >
           {/* Search Input */}
-          <div className="relative border-b border-buncha-border">
+          <div className="relative border-b border-buncha-border py-4" data-drag-region>
             <div className="absolute left-5 top-1/2 -translate-y-1/2 flex items-center gap-2">
               <Search className="w-5 h-5 text-buncha-text-muted" />
             </div>
@@ -793,7 +794,7 @@ function App() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={status || "Search for tools..."}
-              className={`w-full bg-transparent px-14 py-5 text-lg outline-none ${
+              className={`ml-15 w-145 py-1 bg-transparent text-lg outline-none ${
                 status
                   ? "text-buncha-accent placeholder-buncha-accent"
                   : "text-buncha-text placeholder-buncha-text-muted"
@@ -802,13 +803,13 @@ function App() {
             />
             {calculatorResult && (
               <div className="absolute right-5 top-1/2 -translate-y-1/2">
-                <span className="text-buncha-text-muted text-base">= {calculatorResult}</span>
+                <span className="z-99 select-text text-buncha-text-muted text-base">= {calculatorResult}</span>
               </div>
             )}
           </div>
 
           {/* Results List */}
-          <div className="max-h-[340px] overflow-y-auto scrollbar-hidden" data-no-drag>
+          <div className="max-h-[340px] overflow-y-auto scrollbar-hidden">
             {filteredTools.length > 0 ? (
               <div className="py-2">
                 {filteredTools.map((tool, index) => {
@@ -863,7 +864,7 @@ function App() {
           </div>
 
           {/* Footer */}
-          <div className="border-t border-buncha-border px-5 py-3 bg-buncha-surface/30">
+          <div className="border-t border-buncha-border px-5 py-3 bg-buncha-surface/30" data-drag-region>
             <div className="flex items-center justify-between text-xs text-buncha-text-muted">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-1.5">
@@ -897,7 +898,7 @@ function App() {
       {showSettings && (
         <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
             <div className="flex items-center">
               <SettingsIcon className="w-5 h-5 text-buncha-accent mr-3" />
               <span className="text-buncha-text text-base font-medium">Settings</span>
@@ -984,7 +985,7 @@ function App() {
       {showCurrency && (
         <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
             <div className="flex items-center">
               <DollarSign className="w-5 h-5 text-buncha-accent mr-3" />
               <span className="text-buncha-text text-base font-medium">Currency Conversion</span>
@@ -1015,10 +1016,10 @@ function App() {
                 <div className="text-buncha-text-muted text-sm mb-2">From</div>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
-                    <span className="text-buncha-text text-lg">{currencyResult.amount.toLocaleString()}</span>
+                    <span className="text-buncha-text text-lg select-text">{currencyResult.amount.toLocaleString()}</span>
                   </div>
                   <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
-                    <span className="text-buncha-text font-medium">{currencyResult.from}</span>
+                    <span className="text-buncha-text font-medium select-text">{currencyResult.from}</span>
                   </div>
                 </div>
 
@@ -1033,12 +1034,12 @@ function App() {
                 <div className="text-buncha-text-muted text-sm mb-2">To</div>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
-                    <span className="text-buncha-accent text-lg font-medium">
+                    <span className="text-buncha-accent text-lg font-medium select-text">
                       {currencyResult.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
-                    <span className="text-buncha-text font-medium">{currencyResult.to}</span>
+                    <span className="text-buncha-text font-medium select-text">{currencyResult.to}</span>
                   </div>
                 </div>
 
@@ -1049,7 +1050,7 @@ function App() {
                       <TrendingUp className="w-4 h-4 text-buncha-accent" />
                     </div>
                     <div>
-                      <div className="text-buncha-text text-sm">
+                      <div className="text-buncha-text text-sm select-text">
                         1 {currencyResult.from} = {currencyResult.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {currencyResult.to}
                       </div>
                       <div className="text-buncha-text-muted text-xs">{getTimeAgo(currencyUpdatedAt)}</div>
@@ -1073,7 +1074,7 @@ function App() {
       {showConverter && (
         <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
           {/* Tool Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
             <div className="flex items-center">
               <span className="text-xl mr-3">🔄</span>
               <span className="text-buncha-text text-base font-medium">Omni Converter</span>
@@ -1275,7 +1276,7 @@ function App() {
       {showPortKiller && (
         <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
           {/* Tool Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
             <div className="flex items-center">
               <span className="text-xl mr-3">🔌</span>
               <span className="text-buncha-text text-base font-medium">Port Killer</span>
@@ -1394,7 +1395,7 @@ function App() {
       {showTranslation && (
         <div className="bg-[#121212] border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
           {/* Header with close button */}
-          <div className="border-b-buncha-border border-b flex items-center justify-between px-4 py-3 cursor-default">
+          <div className="border-b-buncha-border border-b flex items-center justify-between px-4 py-3 cursor-default" data-drag-region>
             <div className="flex items-center">
               <span className="text-xl mr-3">🌐</span>
               <span className="text-buncha-text text-base font-medium">Quick Translation</span>
@@ -1424,7 +1425,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <div className="text-buncha-text text-lg min-h-[28px]">
+              <div className="text-buncha-text text-lg min-h-[28px] select-text">
                 {translationInput || <span className="text-buncha-text-muted italic">No text selected</span>}
               </div>
             </div>
@@ -1456,7 +1457,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <div className="text-buncha-text text-lg min-h-[28px]">
+              <div className="text-buncha-text text-lg min-h-[28px] select-text">
                 {translationError ? (
                   <span className="text-red-400">{translationError}</span>
                 ) : isTranslating ? (
