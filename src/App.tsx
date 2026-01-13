@@ -1424,7 +1424,7 @@ function App() {
             {/* Footer */}
             <div className="pt-3 border-t border-buncha-border">
               <p className="text-xs text-buncha-text-muted text-center">
-                Translation powered by Lingva Translate
+                Translation powered by MyMemory
               </p>
             </div>
           </div>

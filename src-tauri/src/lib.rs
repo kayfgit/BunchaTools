@@ -819,35 +819,99 @@ pub struct TranslationResult {
     pub target_language: String,
 }
 
-// Lingva Translate API response structure
+// MyMemory API response structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LingvaResponse {
-    translation: String,
-    info: Option<LingvaInfo>,
+#[allow(non_snake_case)]
+struct MyMemoryResponse {
+    responseData: Option<MyMemoryResponseData>,
+    responseStatus: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LingvaInfo {
-    source: Option<LingvaSource>,
+#[allow(non_snake_case)]
+struct MyMemoryResponseData {
+    translatedText: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LingvaSource {
-    detected: Option<LingvaDetected>,
+// Convert whatlang Lang to ISO 639-1 code
+fn lang_to_code(lang: whatlang::Lang) -> &'static str {
+    use whatlang::Lang::*;
+    match lang {
+        Eng => "en",
+        Fra => "fr",
+        Deu => "de",
+        Spa => "es",
+        Por => "pt",
+        Ita => "it",
+        Nld => "nl",
+        Rus => "ru",
+        Ukr => "uk",
+        Pol => "pl",
+        Jpn => "ja",
+        Cmn => "zh",
+        Kor => "ko",
+        Ara => "ar",
+        Hin => "hi",
+        Tur => "tr",
+        Vie => "vi",
+        Tha => "th",
+        Ind => "id",
+        Ces => "cs",
+        Ell => "el",
+        Heb => "he",
+        Swe => "sv",
+        Dan => "da",
+        Fin => "fi",
+        Nob => "no",
+        Hun => "hu",
+        Ron => "ro",
+        Slk => "sk",
+        Bul => "bg",
+        _ => "en", // Default fallback
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LingvaDetected {
-    code: String,
-    name: String,
+// Convert whatlang Lang to display name
+fn lang_to_name(lang: whatlang::Lang) -> &'static str {
+    use whatlang::Lang::*;
+    match lang {
+        Eng => "English",
+        Fra => "French",
+        Deu => "German",
+        Spa => "Spanish",
+        Por => "Portuguese",
+        Ita => "Italian",
+        Nld => "Dutch",
+        Rus => "Russian",
+        Ukr => "Ukrainian",
+        Pol => "Polish",
+        Jpn => "Japanese",
+        Cmn => "Chinese",
+        Kor => "Korean",
+        Ara => "Arabic",
+        Hin => "Hindi",
+        Tur => "Turkish",
+        Vie => "Vietnamese",
+        Tha => "Thai",
+        Ind => "Indonesian",
+        Ces => "Czech",
+        Ell => "Greek",
+        Heb => "Hebrew",
+        Swe => "Swedish",
+        Dan => "Danish",
+        Fin => "Finnish",
+        Nob => "Norwegian",
+        Hun => "Hungarian",
+        Ron => "Romanian",
+        Slk => "Slovak",
+        Bul => "Bulgarian",
+        Lat => "Latin",
+        Epo => "Esperanto",
+        _ => "Unknown",
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LingvaError {
-    error: String,
-}
-
-// Language code to name mapping (fallback if API doesn't provide name)
+// Language code to name mapping
 fn get_language_name(code: &str) -> String {
     match code.to_lowercase().as_str() {
         "en" => "English".to_string(),
@@ -855,7 +919,7 @@ fn get_language_name(code: &str) -> String {
         "es" => "Spanish".to_string(),
         "fr" => "French".to_string(),
         "de" => "German".to_string(),
-        "zh" => "Chinese".to_string(),
+        "zh" | "zh-cn" | "zh-tw" => "Chinese".to_string(),
         "ko" => "Korean".to_string(),
         "pt" => "Portuguese".to_string(),
         "ru" => "Russian".to_string(),
@@ -886,6 +950,27 @@ fn get_language_name(code: &str) -> String {
 
 #[tauri::command]
 async fn translate_text(text: String, target_lang: String) -> Result<TranslationResult, String> {
+    // Detect language locally using whatlang
+    let detected = whatlang::detect(&text);
+
+    let (source_code, detected_name) = match detected {
+        Some(info) => {
+            let code = lang_to_code(info.lang());
+            let name = lang_to_name(info.lang());
+            (code, name.to_string())
+        }
+        None => ("en", "Unknown".to_string()), // Default to English if detection fails
+    };
+
+    // If source and target are the same, just return the original text
+    if source_code == target_lang {
+        return Ok(TranslationResult {
+            translated_text: text,
+            detected_language: detected_name,
+            target_language: get_language_name(&target_lang),
+        });
+    }
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -894,60 +979,37 @@ async fn translate_text(text: String, target_lang: String) -> Result<Translation
     // URL encode the text
     let encoded_text = urlencoding::encode(&text);
 
-    // List of Lingva instances to try (with fallbacks)
-    let instances = [
-        "lingva.ml",
-        "lingva.lunar.icu",
-        "translate.plausibility.cloud",
-    ];
+    // MyMemory API endpoint
+    let url = format!(
+        "https://api.mymemory.translated.net/get?q={}&langpair={}|{}",
+        encoded_text, source_code, target_lang
+    );
 
-    let mut last_error = String::from("All translation servers failed");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect: {}", e))?;
 
-    for instance in instances {
-        let url = format!(
-            "https://{}/api/v1/auto/{}/{}",
-            instance, target_lang, encoded_text
-        );
-
-        match client.get(&url).send().await {
-            Ok(response) => {
-                if response.status().is_success() {
-                    match response.json::<LingvaResponse>().await {
-                        Ok(data) => {
-                            // Extract detected language info
-                            let detected_lang = data
-                                .info
-                                .and_then(|i| i.source)
-                                .and_then(|s| s.detected)
-                                .map(|d| d.name)
-                                .unwrap_or_else(|| "Auto-detected".to_string());
-
-                            return Ok(TranslationResult {
-                                translated_text: data.translation,
-                                detected_language: detected_lang,
-                                target_language: get_language_name(&target_lang),
-                            });
-                        }
-                        Err(e) => {
-                            last_error = format!("Failed to parse response from {}: {}", instance, e);
-                        }
-                    }
-                } else {
-                    // Try to get error message
-                    if let Ok(err) = response.json::<LingvaError>().await {
-                        last_error = format!("{}: {}", instance, err.error);
-                    } else {
-                        last_error = format!("{} returned error status", instance);
-                    }
-                }
-            }
-            Err(e) => {
-                last_error = format!("Failed to connect to {}: {}", instance, e);
-            }
-        }
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
     }
 
-    Err(last_error)
+    let data: MyMemoryResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let translated_text = data
+        .responseData
+        .and_then(|r| r.translatedText)
+        .ok_or_else(|| "No translation received".to_string())?;
+
+    Ok(TranslationResult {
+        translated_text,
+        detected_language: detected_name,
+        target_language: get_language_name(&target_lang),
+    })
 }
 
 fn toggle_window(app: &AppHandle) {
