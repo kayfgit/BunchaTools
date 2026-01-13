@@ -4,6 +4,24 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { writeText, readText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  Search,
+  X,
+  Loader2,
+  ArrowDown,
+  TrendingUp,
+  RefreshCw,
+  Image,
+  Music,
+  Video,
+  FileText,
+  Upload,
+  Check,
+  Monitor,
+  AlertCircle,
+  Copy,
+  File,
+} from "lucide-react";
 
 interface Tool {
   id: string;
@@ -742,19 +760,7 @@ function App() {
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center px-4 py-3 cursor-default">
-            <svg
-              className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
+            <Search className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0" />
             <input
               ref={inputRef}
               type="text"
@@ -786,19 +792,7 @@ function App() {
                 }}
                 className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
@@ -885,10 +879,7 @@ function App() {
           <div className="p-4">
             {currencyLoading && !currencyResult ? (
               <div className="flex items-center justify-center py-8">
-                <svg className="w-6 h-6 animate-spin text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                </svg>
+                <Loader2 className="w-6 h-6 animate-spin text-buncha-accent" />
               </div>
             ) : currencyError ? (
               <div className="text-center py-8">
@@ -910,9 +901,7 @@ function App() {
                 {/* Arrow */}
                 <div className="flex justify-center my-2">
                   <div className="w-8 h-8 rounded-full bg-buncha-surface border border-buncha-border flex items-center justify-center">
-                    <svg className="w-4 h-4 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 5v14M19 12l-7 7-7-7" />
-                    </svg>
+                    <ArrowDown className="w-4 h-4 text-buncha-text-muted" />
                   </div>
                 </div>
 
@@ -933,10 +922,7 @@ function App() {
                 <div className="flex items-center justify-between p-3 bg-buncha-surface rounded-lg border border-buncha-border">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-buncha-accent/20 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M23 6l-9.5 9.5-5-5L1 18" />
-                        <path d="M17 6h6v6" />
-                      </svg>
+                      <TrendingUp className="w-4 h-4 text-buncha-accent" />
                     </div>
                     <div>
                       <div className="text-buncha-text text-sm">
@@ -950,10 +936,7 @@ function App() {
                     disabled={currencyLoading}
                     className="text-buncha-text-muted hover:text-buncha-text cursor-pointer disabled:opacity-50"
                   >
-                    <svg className={`w-5 h-5 ${currencyLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M23 4v6h-6M1 20v-6h6" />
-                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                    </svg>
+                    <RefreshCw className={`w-5 h-5 ${currencyLoading ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
               </>
@@ -981,9 +964,7 @@ function App() {
               }}
               className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-4 h-4" />
             </button>
           </div>
           <div className="p-4">
@@ -999,11 +980,7 @@ function App() {
                     onClick={() => setConverterType("image")}
                     className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
                   >
-                    <svg className="w-8 h-8 mb-2 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <path d="M21 15l-5-5L5 21" />
-                    </svg>
+                    <Image className="w-8 h-8 mb-2 text-blue-500" />
                     <span className="text-blue-500 text-sm font-medium">Images</span>
                   </button>
                   {/* Audio */}
@@ -1011,11 +988,7 @@ function App() {
                     onClick={() => setConverterType("audio")}
                     className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
                   >
-                    <svg className="w-8 h-8 mb-2 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M9 18V5l12-2v13" />
-                      <circle cx="6" cy="18" r="3" />
-                      <circle cx="18" cy="16" r="3" />
-                    </svg>
+                    <Music className="w-8 h-8 mb-2 text-green-500" />
                     <span className="text-green-500 text-sm font-medium">Audio</span>
                   </button>
                   {/* Video */}
@@ -1023,10 +996,7 @@ function App() {
                     onClick={() => setConverterType("video")}
                     className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface hover:border-buncha-text-muted transition-colors cursor-pointer"
                   >
-                    <svg className="w-8 h-8 mb-2 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="2" y="4" width="16" height="14" rx="2" />
-                      <path d="M22 7l-4 3 4 3V7z" />
-                    </svg>
+                    <Video className="w-8 h-8 mb-2 text-purple-500" />
                     <span className="text-purple-500 text-sm font-medium">Video</span>
                   </button>
                   {/* Documents - Disabled */}
@@ -1034,12 +1004,7 @@ function App() {
                     disabled
                     className="flex flex-col items-center justify-center p-6 rounded-lg border border-buncha-border bg-buncha-surface opacity-50 cursor-not-allowed"
                   >
-                    <svg className="w-8 h-8 mb-2 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <path d="M14 2v6h6" />
-                      <path d="M16 13H8" />
-                      <path d="M16 17H8" />
-                    </svg>
+                    <FileText className="w-8 h-8 mb-2 text-orange-500" />
                     <span className="text-orange-500 text-sm font-medium">Documents</span>
                   </button>
                 </div>
@@ -1074,11 +1039,7 @@ function App() {
                     className="w-full p-8 border-2 border-dashed border-buncha-border rounded-lg hover:border-buncha-text-muted transition-colors flex flex-col items-center justify-center cursor-pointer"
                   >
                     <div className="w-12 h-12 rounded-full bg-buncha-surface flex items-center justify-center mb-3">
-                      <svg className="w-6 h-6 text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
+                      <Upload className="w-6 h-6 text-buncha-accent" />
                     </div>
                     <span className="text-buncha-accent text-sm font-medium">Click to upload</span>
                     <span className="text-buncha-text-muted text-xs mt-1">or drag and drop your file here</span>
@@ -1086,10 +1047,7 @@ function App() {
                 ) : (
                   <div className="flex items-center p-3 bg-buncha-surface rounded-lg border border-buncha-border">
                     <div className="w-10 h-10 rounded bg-buncha-bg flex items-center justify-center mr-3">
-                      <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <path d="M14 2v6h6" />
-                      </svg>
+                      <File className="w-5 h-5 text-buncha-text-muted" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-buncha-text text-sm font-medium truncate">{selectedFile.name}</div>
@@ -1104,10 +1062,7 @@ function App() {
                       }}
                       className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
                     >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
                 )}
@@ -1134,9 +1089,7 @@ function App() {
                             }`}
                           >
                             {isSelected && (
-                              <svg className="w-4 h-4 inline mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
+                              <Check className="w-4 h-4 inline mr-1" strokeWidth={3} />
                             )}
                             {format}
                           </button>
@@ -1213,9 +1166,7 @@ function App() {
               }}
               className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-4 h-4" />
             </button>
           </div>
           <div className="p-4">
@@ -1240,10 +1191,7 @@ function App() {
                 disabled={!portInput || isScanning}
                 className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="M21 21l-4.35-4.35" />
-                </svg>
+                <Search className="w-4 h-4" />
                 Scan
               </button>
             </div>
@@ -1270,10 +1218,7 @@ function App() {
               {isScanning ? (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center text-buncha-text-muted">
-                    <svg className="w-6 h-6 animate-spin mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                    </svg>
+                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
                     <span className="text-sm">Scanning port {scannedPort}...</span>
                   </div>
                 </div>
@@ -1286,11 +1231,7 @@ function App() {
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-buncha-bg flex items-center justify-center">
-                          <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2" />
-                            <path d="M8 21h8" />
-                            <path d="M12 17v4" />
-                          </svg>
+                          <Monitor className="w-5 h-5 text-buncha-text-muted" />
                         </div>
                         <div>
                           <div className="text-buncha-text text-sm font-medium">{process.name}</div>
@@ -1311,11 +1252,7 @@ function App() {
               ) : (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center text-buncha-text-muted">
-                    <svg className="w-10 h-10 mb-2 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 8v4" />
-                      <circle cx="12" cy="16" r="1" fill="currentColor" />
-                    </svg>
+                    <AlertCircle className="w-10 h-10 mb-2 opacity-50" strokeWidth={1.5} />
                     <span className="text-sm">
                       {scannedPort !== null
                         ? `No processes found on port ${scannedPort}`
@@ -1342,9 +1279,7 @@ function App() {
               onClick={() => setShowTranslation(false)}
               className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-4 h-4" />
             </button>
           </div>
 
@@ -1361,10 +1296,7 @@ function App() {
                     className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
                     title="Copy source text"
                   >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
+                    <Copy className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1378,14 +1310,9 @@ function App() {
               <div className="grow border-t border-buncha-border"/>
               <div className="flex justify-center mx-4 my-4">
                 {isTranslating ? (
-                  <svg className="w-5 h-5 animate-spin text-buncha-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                  </svg>
+                  <Loader2 className="w-5 h-5 animate-spin text-buncha-accent" />
                 ) : (
-                  <svg className="w-5 h-5 text-buncha-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 5v14M19 12l-7 7-7-7" />
-                  </svg>
+                  <ArrowDown className="w-5 h-5 text-buncha-text-muted" />
                 )}
               </div>
               <div className="grow border-t border-buncha-border"/>
@@ -1401,10 +1328,7 @@ function App() {
                     className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
                     title="Copy translation"
                   >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
+                    <Copy className="w-4 h-4" />
                   </button>
                 </div>
               </div>
