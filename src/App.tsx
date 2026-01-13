@@ -21,13 +21,21 @@ import {
   AlertCircle,
   Copy,
   File,
+  ArrowRight,
+  Repeat2,
+  Network,
+  Languages,
+  Pipette,
+  Settings as SettingsIcon,
+  LucideIcon,
+  DollarSign,
 } from "lucide-react";
 
 interface Tool {
   id: string;
   name: string;
   description: string;
-  icon: string;
+  icon: LucideIcon;
   keywords: string[];
   action?: () => Promise<void>;
   isSettings?: boolean;
@@ -39,12 +47,11 @@ interface Settings {
   launch_at_startup: boolean;
 }
 
-const BASE_HEIGHT = 70;
-const RESULTS_HEIGHT = 340;
+const BASE_HEIGHT = 500;
 const SETTINGS_HEIGHT = 280;
 const CONVERTER_HEIGHT = 450;
 const PORT_KILLER_HEIGHT = 450;
-const CURRENCY_HEIGHT = 400;
+const CURRENCY_HEIGHT = 550;
 const TRANSLATION_HEIGHT = 380;
 
 // Format options for converter
@@ -245,7 +252,7 @@ function App() {
       id: "color-picker",
       name: "Color Picker",
       description: "Pick any color from your screen",
-      icon: "🎨",
+      icon: Pipette,
       keywords: ["color", "picker", "eyedropper", "hex", "rgb", "colour"],
       action: async () => {
         try {
@@ -261,18 +268,10 @@ function App() {
       },
     },
     {
-      id: "settings",
-      name: "Settings",
-      description: "Configure BunchaTools preferences",
-      icon: "⚙️",
-      keywords: ["settings", "preferences", "config", "options", "hotkey", "startup"],
-      isSettings: true,
-    },
-    {
       id: "omni-converter",
       name: "Omni Converter",
       description: "Convert images, audio, and video files",
-      icon: "🔄",
+      icon: Repeat2,
       keywords: ["convert", "converter", "video", "audio", "image", "mp4", "mp3", "png", "jpg", "wav", "gif", "webp", "avi", "mkv"],
       action: async () => {
         await invoke("set_auto_hide", { enabled: false });
@@ -286,8 +285,8 @@ function App() {
     {
       id: "port-killer",
       name: "Port Killer",
-      description: "Free up ports by killing processes",
-      icon: "🔌",
+      description: "Free up ports that didn't close properly",
+      icon: Network,
       keywords: ["port", "kill", "process", "free", "localhost", "server", "3000", "8080", "1420", "network", "tcp"],
       action: async () => {
         await invoke("set_auto_hide", { enabled: false });
@@ -300,9 +299,9 @@ function App() {
     },
     {
       id: "quick-translation",
-      name: "Quick Translation",
-      description: "Translate text between languages instantly",
-      icon: "🌐",
+      name: "Quick Translate",
+      description: "Instant translation of highlighted text",
+      icon: Languages,
       keywords: ["translate", "translation", "language", "japanese", "english", "spanish", "french", "german", "chinese", "korean"],
       action: async () => {
         setQuery("");
@@ -352,6 +351,14 @@ function App() {
           }
         }
       },
+    },
+    {
+      id: "settings",
+      name: "Settings",
+      description: "Configure BunchaTools preferences",
+      icon: SettingsIcon,
+      keywords: ["settings", "preferences", "config", "options", "hotkey", "startup"],
+      isSettings: true,
     },
   ];
 
@@ -418,7 +425,7 @@ function App() {
 
   useEffect(() => {
     if (query.trim() === "") {
-      setFilteredTools([]);
+      setFilteredTools(tools);
       setSelectedIndex(0);
       setCurrencyResult(null);
       setCurrencyError(null);
@@ -478,14 +485,12 @@ function App() {
         newHeight = SETTINGS_HEIGHT;
       } else if (currencyResult || currencyLoading) {
         newHeight = CURRENCY_HEIGHT;
-      } else if (query.length > 0) {
-        newHeight = RESULTS_HEIGHT;
       }
 
       await appWindow.setSize(new LogicalSize(680, newHeight));
     };
     resizeWindow();
-  }, [query.length > 0, showSettings, showConverter, showPortKiller, showTranslation, currencyResult, currencyLoading]);
+  }, [showSettings, showConverter, showPortKiller, showTranslation, currencyResult, currencyLoading]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -585,8 +590,27 @@ function App() {
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
   const showCurrency = (currencyResult || currencyLoading) && !showSettings && !showConverter && !showPortKiller;
-  const showResults = query.length > 0 && !showSettings && !showConverter && !showPortKiller && !showCurrency;
   const calculatorResult = query ? evaluateExpression(query) : null;
+
+  // Global escape key handler for panels without input focus
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showCurrency) {
+          setCurrencyResult(null);
+          setCurrencyError(null);
+          setQuery("");
+        } else if (showSettings) {
+          setShowSettings(false);
+        }
+      }
+    };
+
+    if (showCurrency || showSettings) {
+      window.addEventListener("keydown", handleGlobalKeyDown);
+      return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+    }
+  }, [showCurrency, showSettings]);
 
   // Format time ago for currency update
   const getTimeAgo = (date: Date | null) => {
@@ -751,57 +775,140 @@ function App() {
 
   return (
     <div className="p-2">
-      {/* Search Bar - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && !showTranslation && (
+      {/* Command Palette - Hidden when tools are open */}
+      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showCurrency && (
         <div
-          className={`bg-buncha-bg border border-buncha-border shadow-2xl ${
-            showResults || showSettings || showCurrency ? "rounded-t-buncha" : "rounded-buncha"
-          }`}
+          className="bg-buncha-bg/95 backdrop-blur-xl border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
           onMouseDown={handleDragStart}
         >
-          <div className="flex items-center px-4 py-3 cursor-default">
-            <Search className="w-5 h-5 text-buncha-text-muted mr-3 flex-shrink-0" />
+          {/* Search Input */}
+          <div className="relative border-b border-buncha-border">
+            <div className="absolute left-5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <Search className="w-5 h-5 text-buncha-text-muted" />
+            </div>
             <input
               ref={inputRef}
               type="text"
-              value={showSettings ? "Settings" : query}
-              onChange={(e) => !showSettings && setQuery(e.target.value)}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={status || "Search for tools..."}
-              readOnly={showSettings}
-              className={`bg-transparent text-base outline-none ${
-                calculatorResult ? "" : "flex-1"
-              } ${
+              className={`w-full bg-transparent px-14 py-5 text-lg outline-none ${
                 status
                   ? "text-buncha-accent placeholder-buncha-accent"
                   : "text-buncha-text placeholder-buncha-text-muted"
-              } ${showSettings ? "cursor-default" : ""}`}
-              style={calculatorResult ? { width: `${query.length + 0.5}ch` } : undefined}
+              }`}
               autoFocus
             />
             {calculatorResult && (
-              <span className="text-buncha-text-muted text-base whitespace-nowrap flex-1 ml-1">
-                = {calculatorResult}
-              </span>
+              <div className="absolute right-5 top-1/2 -translate-y-1/2">
+                <span className="text-buncha-text-muted text-base">= {calculatorResult}</span>
+              </div>
             )}
-            {(query || showSettings) && (
-              <button
-                onClick={async () => {
-                  setQuery("");
-                  setShowSettings(false);
-                }}
-                className="text-buncha-text-muted hover:text-buncha-text ml-2 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          </div>
+
+          {/* Results List */}
+          <div className="max-h-[340px] overflow-y-auto scrollbar-hidden">
+            {filteredTools.length > 0 ? (
+              <div className="py-2">
+                {filteredTools.map((tool, index) => {
+                  const IconComponent = tool.icon;
+                  return (
+                    <div
+                      key={tool.id}
+                      onClick={() => executeTool(tool)}
+                      className={`group px-5 py-4 transition-all cursor-pointer flex items-center gap-4 ${
+                        index === selectedIndex
+                          ? "bg-buncha-surface/50"
+                          : "hover:bg-buncha-surface/50"
+                      }`}
+                    >
+                      <div className={`flex items-center justify-center w-12 h-12 rounded-xl transition-colors ${
+                        index === selectedIndex
+                          ? "bg-buncha-accent/20"
+                          : "bg-buncha-accent/10 group-hover:bg-buncha-accent/20"
+                      }`}>
+                        <IconComponent className="w-6 h-6 text-buncha-accent" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className={`font-semibold mb-0.5 transition-colors ${
+                          index === selectedIndex
+                            ? "text-buncha-accent"
+                            : "text-buncha-text group-hover:text-buncha-accent"
+                        }`}>
+                          {tool.name}
+                        </h3>
+                        <p className="text-sm text-buncha-text-muted line-clamp-1">
+                          {tool.description}
+                        </p>
+                      </div>
+                      <ArrowRight className={`w-5 h-5 text-buncha-text-muted transition-all ${
+                        index === selectedIndex
+                          ? "opacity-100 translate-x-1"
+                          : "opacity-0 group-hover:opacity-100 group-hover:translate-x-1"
+                      }`} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-16 px-5 text-center">
+                <div className="w-16 h-16 rounded-full bg-buncha-surface/50 flex items-center justify-center mx-auto mb-4">
+                  <Search className="w-8 h-8 text-buncha-text-muted" />
+                </div>
+                <p className="text-buncha-text-muted mb-1">No tools found</p>
+                <p className="text-sm text-buncha-text-muted/70">Try searching for "converter" or "translate"</p>
+              </div>
             )}
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-buncha-border px-5 py-3 bg-buncha-surface/30">
+            <div className="flex items-center justify-between text-xs text-buncha-text-muted">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5">
+                  <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                    <span className="font-medium">↑</span>
+                  </div>
+                  <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                    <span className="font-medium">↓</span>
+                  </div>
+                  <span>to navigate</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                    <span className="font-medium">↵</span>
+                  </div>
+                  <span>to select</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                  <span className="font-medium">esc</span>
+                </div>
+                <span>to close</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+        <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+            <div className="flex items-center">
+              <SettingsIcon className="w-5 h-5 text-buncha-accent mr-3" />
+              <span className="text-buncha-text text-base font-medium">Settings</span>
+            </div>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
           <div className="p-4 space-y-4">
             {/* Hotkey Setting */}
             <div className="flex items-center justify-between">
@@ -875,7 +982,24 @@ function App() {
 
       {/* Currency Conversion Panel */}
       {showCurrency && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl">
+        <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default">
+            <div className="flex items-center">
+              <DollarSign className="w-5 h-5 text-buncha-accent mr-3" />
+              <span className="text-buncha-text text-base font-medium">Currency Conversion</span>
+            </div>
+            <button
+              onClick={() => {
+                setCurrencyResult(null);
+                setCurrencyError(null);
+                setQuery("");
+              }}
+              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
           <div className="p-4">
             {currencyLoading && !currencyResult ? (
               <div className="flex items-center justify-center py-8">
@@ -1355,46 +1479,6 @@ function App() {
         </div>
       )}
 
-      {/* Search Results */}
-      {showResults && (
-        <div className="bg-buncha-bg border border-t-0 border-buncha-border rounded-b-buncha shadow-2xl max-h-60 overflow-y-auto scrollbar-hidden">
-          {filteredTools.length > 0 ? (
-            <div className="py-2">
-              <div className="px-4 py-1 text-xs text-buncha-text-muted uppercase tracking-wider">
-                Results
-              </div>
-              {filteredTools.map((tool, index) => (
-                <div
-                  key={tool.id}
-                  onClick={() => executeTool(tool)}
-                  className={`flex items-center px-4 py-2 cursor-pointer select-none ${
-                    index === selectedIndex
-                      ? "bg-buncha-surface"
-                      : "hover:bg-buncha-surface"
-                  }`}
-                >
-                  <span className="text-xl mr-3">{tool.icon}</span>
-                  <div className="flex-1">
-                    <div className="text-buncha-text text-sm font-medium">
-                      {tool.name}
-                    </div>
-                    <div className="text-buncha-text-muted text-xs">
-                      {tool.description}
-                    </div>
-                  </div>
-                  <span className="text-buncha-text-muted text-xs">
-                    {tool.isSettings ? "Settings" : "Tool"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="px-4 py-8 text-center text-buncha-text-muted">
-              No tools found for "{query}"
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
