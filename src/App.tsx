@@ -808,7 +808,7 @@ function App() {
           </div>
 
           {/* Results List */}
-          <div className="max-h-[340px] overflow-y-auto scrollbar-hidden">
+          <div className="max-h-[340px] overflow-y-auto scrollbar-hidden" data-no-drag>
             {filteredTools.length > 0 ? (
               <div className="py-2">
                 {filteredTools.map((tool, index) => {
