@@ -29,6 +29,8 @@ import {
   DollarSign,
   Calculator,
   Ruler,
+  ExternalLink,
+  Volume2,
 } from "lucide-react";
 
 interface Tool {
@@ -46,12 +48,6 @@ interface Settings {
   hotkey_key: string;
   launch_at_startup: boolean;
 }
-
-const BASE_HEIGHT = 500;
-const SETTINGS_HEIGHT = 280;
-const CONVERTER_HEIGHT = 450;
-const PORT_KILLER_HEIGHT = 450;
-const TRANSLATION_HEIGHT = 380;
 
 // Format options for converter
 const FORMAT_OPTIONS = {
@@ -104,6 +100,21 @@ interface TranslationResult {
   detected_language: string;
   target_language: string;
 }
+
+// Language code to name mapping
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  pt: "Portuguese",
+  it: "Italian",
+  ja: "Japanese",
+  zh: "Chinese",
+  ko: "Korean",
+  ru: "Russian",
+  ar: "Arabic",
+};
 
 // Unit conversion definitions
 interface UnitCategory {
@@ -546,9 +557,10 @@ function App() {
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
   const [detectedLanguage, setDetectedLanguage] = useState("Detecting...");
-  const [targetLanguage] = useState("en");
+  const [targetLanguage, setTargetLanguage] = useState("en");
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
+  const [isTranslationSettingsOpen, setIsTranslationSettingsOpen] = useState(false);
 
   // Quick result state (calculator, unit conversion, currency)
   const [quickResult, setQuickResult] = useState<QuickResult | null>(null);
@@ -719,6 +731,7 @@ function App() {
       setTranslationOutput("");
       setDetectedLanguage("Detecting...");
       setTranslationError(null);
+      setIsTranslationSettingsOpen(false);
       inputRef.current?.focus();
     });
 
@@ -887,26 +900,26 @@ function App() {
     }
   }, [query]);
 
-  // Resize window based on view
+  // Resize window based on active view
   useEffect(() => {
     const resizeWindow = async () => {
       const appWindow = getCurrentWindow();
-      let newHeight = BASE_HEIGHT;
+      let height = 500; // Default height for command palette
 
       if (showConverter) {
-        newHeight = CONVERTER_HEIGHT;
+        height = 450;
       } else if (showPortKiller) {
-        newHeight = PORT_KILLER_HEIGHT;
+        height = 450;
       } else if (showTranslation) {
-        newHeight = TRANSLATION_HEIGHT;
+        height = isTranslationSettingsOpen ? 480 : 400;
       } else if (showSettings) {
-        newHeight = SETTINGS_HEIGHT;
+        height = 280;
       }
 
-      await appWindow.setSize(new LogicalSize(680, newHeight));
+      await appWindow.setSize(new LogicalSize(680, height));
     };
     resizeWindow();
-  }, [showSettings, showConverter, showPortKiller, showTranslation]);
+  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -1729,89 +1742,134 @@ function App() {
 
       {/* Quick Translation Panel */}
       {showTranslation && (
-        <div className="bg-[#121212] border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
-          {/* Header with close button */}
-          <div className="border-b-buncha-border border-b flex items-center justify-between px-4 py-3 cursor-default" data-drag-region>
-            <div className="flex items-center">
-              <span className="text-xl mr-3">🌐</span>
+        <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-buncha-border/50 bg-buncha-surface/30" data-drag-region>
+            <div className="flex items-center gap-3">
+              <Languages className="w-5 h-5 text-buncha-accent" />
               <span className="text-buncha-text text-base font-medium">Quick Translation</span>
             </div>
-            <button
-              onClick={() => setShowTranslation(false)}
-              className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsTranslationSettingsOpen(!isTranslationSettingsOpen)}
+                className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
+              >
+                <SettingsIcon className="w-4 h-4 text-buncha-text-muted hover:text-buncha-text transition-colors" />
+              </button>
+              <button
+                onClick={() => setShowTranslation(false)}
+                className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4 text-buncha-text-muted hover:text-buncha-text transition-colors" />
+              </button>
+            </div>
           </div>
 
-          <div className="px-6 py-4">
-            {/* Source Language Section */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-buncha-accent text-xs font-medium tracking-wider uppercase">
+          {/* Settings Panel (conditionally shown) */}
+          {isTranslationSettingsOpen && (
+            <div className="px-6 py-4 border-b border-buncha-border/50 bg-buncha-surface/20">
+              <div>
+                <label className="text-sm text-buncha-text-muted mb-2 block">Target language</label>
+                <select
+                  value={targetLanguage}
+                  onChange={(e) => setTargetLanguage(e.target.value)}
+                  className="w-full bg-buncha-bg border border-buncha-border rounded-lg px-3 py-2 text-sm text-buncha-text focus:outline-none focus:border-buncha-accent transition-all cursor-pointer"
+                >
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="it">Italian</option>
+                  <option value="ja">Japanese</option>
+                  <option value="zh">Chinese</option>
+                  <option value="ko">Korean</option>
+                  <option value="ru">Russian</option>
+                  <option value="ar">Arabic</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Main Translation Content */}
+          <div className="p-6">
+            {/* Source Text */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-buncha-accent uppercase tracking-wider">
                   {detectedLanguage}
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
+                    <Volume2 className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
+                  </button>
                   <button
                     onClick={() => translationInput && writeText(translationInput)}
-                    className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-                    title="Copy source text"
+                    className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group"
                   >
-                    <Copy className="w-4 h-4" />
+                    <Copy className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
                   </button>
                 </div>
               </div>
-              <div className="text-buncha-text text-lg min-h-[28px] select-text">
+              <p className="text-lg leading-relaxed text-buncha-text/90 select-text min-h-[28px]">
                 {translationInput || <span className="text-buncha-text-muted italic">No text selected</span>}
+              </p>
+            </div>
+
+            {/* Divider */}
+            <div className="relative py-3 mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-buncha-border/50" />
+              </div>
+              <div className="relative flex justify-center">
+                <div className="bg-buncha-bg px-3">
+                  {isTranslating ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-buncha-accent" />
+                  ) : (
+                    <ArrowDown className="w-5 h-5 text-buncha-text-muted" />
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Arrow Divider */}
-            <div className="flex items-center">
-              <div className="grow border-t border-buncha-border"/>
-              <div className="flex justify-center mx-4 my-4">
-                {isTranslating ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-buncha-accent" />
-                ) : (
-                  <ArrowDown className="w-5 h-5 text-buncha-text-muted" />
-                )}
-              </div>
-              <div className="grow border-t border-buncha-border"/>
-            </div>
-
-            {/* Target Language Section */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-buncha-accent text-xs font-medium tracking-wider uppercase">ENGLISH</span>
-                <div className="flex items-center gap-2">
+            {/* Translated Text */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-buncha-accent uppercase tracking-wider">{LANGUAGE_NAMES[targetLanguage] || targetLanguage}</span>
+                <div className="flex items-center gap-1">
+                  <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
+                    <Volume2 className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
+                  </button>
                   <button
                     onClick={() => translationOutput && writeText(translationOutput)}
-                    className="hover:bg-[#1B1B1B] p-2 rounded-full duration-200 text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-                    title="Copy translation"
+                    className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group"
                   >
-                    <Copy className="w-4 h-4" />
+                    <Copy className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
+                  </button>
+                  <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
+                    <ExternalLink className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
                   </button>
                 </div>
               </div>
-              <div className="text-buncha-text text-lg min-h-[28px] select-text">
+              <p className="text-lg leading-relaxed font-medium text-buncha-text select-text min-h-[28px]">
                 {translationError ? (
                   <span className="text-red-400">{translationError}</span>
                 ) : isTranslating ? (
-                  <span className="text-buncha-text-muted italic">Translating...</span>
+                  <span className="text-buncha-text-muted italic font-normal">Translating...</span>
                 ) : translationOutput ? (
                   translationOutput
                 ) : (
-                  <span className="text-buncha-text-muted italic">Translation will appear here</span>
+                  <span className="text-buncha-text-muted italic font-normal">Translation will appear here</span>
                 )}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="pt-3 border-t border-buncha-border">
-              <p className="text-xs text-buncha-text-muted text-center">
-                Translation powered by MyMemory
               </p>
             </div>
+          </div>
+
+          {/* Footer Info */}
+          <div className="px-6 py-3 border-t border-buncha-border/50 bg-buncha-surface/20">
+            <p className="text-xs text-buncha-text-muted text-center">
+              Translation powered by MyMemory
+            </p>
           </div>
         </div>
       )}
