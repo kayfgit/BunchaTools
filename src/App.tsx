@@ -9,8 +9,6 @@ import {
   X,
   Loader2,
   ArrowDown,
-  TrendingUp,
-  RefreshCw,
   Image,
   Music,
   Video,
@@ -29,6 +27,8 @@ import {
   Settings as SettingsIcon,
   LucideIcon,
   DollarSign,
+  Calculator,
+  Ruler,
 } from "lucide-react";
 
 interface Tool {
@@ -51,7 +51,6 @@ const BASE_HEIGHT = 500;
 const SETTINGS_HEIGHT = 280;
 const CONVERTER_HEIGHT = 450;
 const PORT_KILLER_HEIGHT = 450;
-const CURRENCY_HEIGHT = 550;
 const TRANSLATION_HEIGHT = 380;
 
 // Format options for converter
@@ -106,6 +105,260 @@ interface TranslationResult {
   target_language: string;
 }
 
+// Unit conversion definitions
+interface UnitCategory {
+  units: Record<string, number>; // unit name -> conversion factor to base unit
+  aliases: Record<string, string>; // alias -> unit name
+}
+
+const UNIT_CATEGORIES: Record<string, UnitCategory> = {
+  length: {
+    units: {
+      meters: 1,
+      kilometers: 1000,
+      centimeters: 0.01,
+      millimeters: 0.001,
+      miles: 1609.344,
+      yards: 0.9144,
+      feet: 0.3048,
+      inches: 0.0254,
+    },
+    aliases: {
+      m: "meters", meter: "meters", metre: "meters", metres: "meters",
+      km: "kilometers", kilometer: "kilometers", kilometre: "kilometres",
+      cm: "centimeters", centimeter: "centimeters",
+      mm: "millimeters", millimeter: "millimeters",
+      mi: "miles", mile: "miles",
+      yd: "yards", yard: "yards",
+      ft: "feet", foot: "feet",
+      in: "inches", inch: "inches",
+    },
+  },
+  weight: {
+    units: {
+      kilograms: 1,
+      grams: 0.001,
+      milligrams: 0.000001,
+      pounds: 0.453592,
+      ounces: 0.0283495,
+      tons: 1000,
+    },
+    aliases: {
+      kg: "kilograms", kilogram: "kilograms", kilo: "kilograms", kilos: "kilograms",
+      g: "grams", gram: "grams",
+      mg: "milligrams", milligram: "milligrams",
+      lb: "pounds", lbs: "pounds", pound: "pounds",
+      oz: "ounces", ounce: "ounces",
+      ton: "tons", t: "tons",
+    },
+  },
+  temperature: {
+    units: { celsius: 1, fahrenheit: 1, kelvin: 1 },
+    aliases: {
+      c: "celsius", "°c": "celsius",
+      f: "fahrenheit", "°f": "fahrenheit",
+      k: "kelvin",
+    },
+  },
+  volume: {
+    units: {
+      liters: 1,
+      milliliters: 0.001,
+      gallons: 3.78541,
+      quarts: 0.946353,
+      pints: 0.473176,
+      cups: 0.236588,
+    },
+    aliases: {
+      l: "liters", liter: "liters", litre: "liters", litres: "liters",
+      ml: "milliliters", milliliter: "milliliters",
+      gal: "gallons", gallon: "gallons",
+      qt: "quarts", quart: "quarts",
+      pt: "pints", pint: "pints",
+      cup: "cups",
+    },
+  },
+  time: {
+    units: {
+      seconds: 1,
+      minutes: 60,
+      hours: 3600,
+      days: 86400,
+      weeks: 604800,
+    },
+    aliases: {
+      s: "seconds", sec: "seconds", second: "seconds",
+      min: "minutes", minute: "minutes", mins: "minutes",
+      h: "hours", hr: "hours", hour: "hours", hrs: "hours",
+      d: "days", day: "days",
+      w: "weeks", week: "weeks", wk: "weeks",
+    },
+  },
+};
+
+interface UnitConversionResult {
+  amount: number;
+  fromUnit: string;
+  toUnit: string;
+  result: number;
+  category: string;
+}
+
+// Parse unit conversion query like "10 feet to meters"
+function parseUnitQuery(query: string): UnitConversionResult | null {
+  const cleaned = query.toLowerCase().trim();
+  const match = cleaned.match(/^([\d.,]+)\s*([a-z°]+)\s+(?:in|to)\s+([a-z°]+)$/);
+  if (!match) return null;
+
+  const amount = parseFloat(match[1].replace(",", "."));
+  if (isNaN(amount)) return null;
+
+  const fromInput = match[2];
+  const toInput = match[3];
+
+  // Find units in categories
+  for (const [categoryName, category] of Object.entries(UNIT_CATEGORIES)) {
+    const fromUnit = category.aliases[fromInput] || (category.units[fromInput] ? fromInput : null);
+    const toUnit = category.aliases[toInput] || (category.units[toInput] ? toInput : null);
+
+    if (fromUnit && toUnit && category.units[fromUnit] && category.units[toUnit]) {
+      let result: number;
+
+      // Special handling for temperature
+      if (categoryName === "temperature") {
+        if (fromUnit === "celsius" && toUnit === "fahrenheit") {
+          result = (amount * 9/5) + 32;
+        } else if (fromUnit === "fahrenheit" && toUnit === "celsius") {
+          result = (amount - 32) * 5/9;
+        } else if (fromUnit === "celsius" && toUnit === "kelvin") {
+          result = amount + 273.15;
+        } else if (fromUnit === "kelvin" && toUnit === "celsius") {
+          result = amount - 273.15;
+        } else if (fromUnit === "fahrenheit" && toUnit === "kelvin") {
+          result = (amount - 32) * 5/9 + 273.15;
+        } else if (fromUnit === "kelvin" && toUnit === "fahrenheit") {
+          result = (amount - 273.15) * 9/5 + 32;
+        } else {
+          result = amount; // Same unit
+        }
+      } else {
+        // Standard conversion: amount * fromFactor / toFactor
+        const fromFactor = category.units[fromUnit];
+        const toFactor = category.units[toUnit];
+        result = (amount * fromFactor) / toFactor;
+      }
+
+      return { amount, fromUnit, toUnit, result, category: categoryName };
+    }
+  }
+
+  return null;
+}
+
+// Quick result interface for unified display
+interface QuickResult {
+  type: "calculator" | "unit" | "currency";
+  query: string;
+  result: string;
+  icon: LucideIcon;
+  copyValue: string;
+  isPreview?: boolean; // True if this is a suggested preview
+}
+
+// Default conversion targets for each unit (most common conversions)
+const DEFAULT_UNIT_TARGETS: Record<string, string> = {
+  // Length - metric to imperial and vice versa
+  meters: "feet", feet: "meters", kilometers: "miles", miles: "kilometers",
+  centimeters: "inches", inches: "centimeters", millimeters: "inches",
+  yards: "meters",
+  // Weight
+  kilograms: "pounds", pounds: "kilograms", grams: "ounces", ounces: "grams",
+  milligrams: "grams", tons: "pounds",
+  // Temperature
+  fahrenheit: "celsius", celsius: "fahrenheit", kelvin: "celsius",
+  // Volume
+  liters: "gallons", gallons: "liters", milliliters: "cups",
+  cups: "milliliters", quarts: "liters", pints: "liters",
+  // Time
+  seconds: "minutes", minutes: "hours", hours: "minutes",
+  days: "hours", weeks: "days",
+};
+
+// Build a map of all unit names/aliases for fuzzy matching
+function getAllUnitNames(): string[] {
+  const names: string[] = [];
+  for (const category of Object.values(UNIT_CATEGORIES)) {
+    names.push(...Object.keys(category.units));
+    names.push(...Object.keys(category.aliases));
+  }
+  return [...new Set(names)]; // Remove duplicates
+}
+
+// Find the canonical unit name from an alias
+function getCanonicalUnit(input: string): string | null {
+  for (const category of Object.values(UNIT_CATEGORIES)) {
+    if (category.units[input]) return input;
+    if (category.aliases[input]) return category.aliases[input];
+  }
+  return null;
+}
+
+// Parse partial unit query like "10 fahr" and suggest completion
+interface PartialUnitSuggestion {
+  amount: number;
+  fromUnit: string;
+  toUnit: string;
+  suggestedQuery: string;
+}
+
+function parsePartialUnitQuery(query: string): PartialUnitSuggestion | null {
+  const cleaned = query.toLowerCase().trim();
+
+  // Match patterns like "10 fahr" or "10fahr" (number followed by partial unit name)
+  const match = cleaned.match(/^([\d.,]+)\s*([a-z°]+)$/);
+  if (!match) return null;
+
+  const amount = parseFloat(match[1].replace(",", "."));
+  if (isNaN(amount) || amount <= 0) return null;
+
+  const partialUnit = match[2];
+  if (partialUnit.length < 2) return null; // Need at least 2 chars to suggest
+
+  // Find matching units that start with the partial input
+  const allUnits = getAllUnitNames();
+  const matches = allUnits.filter(u => u.startsWith(partialUnit) && u !== partialUnit);
+
+  if (matches.length === 0) return null;
+
+  // Sort by length (prefer shorter/more common units) and take the first match
+  matches.sort((a, b) => a.length - b.length);
+  const bestMatch = matches[0];
+
+  // Get canonical unit name
+  const fromUnit = getCanonicalUnit(bestMatch);
+  if (!fromUnit) return null;
+
+  // Get default target
+  const toUnit = DEFAULT_UNIT_TARGETS[fromUnit];
+  if (!toUnit) return null;
+
+  return {
+    amount,
+    fromUnit,
+    toUnit,
+    suggestedQuery: `${amount} ${fromUnit} to ${toUnit}`,
+  };
+}
+
+// Parse partial currency query like "10 yen" and suggest completion
+// This will be called after CURRENCY_ALIASES is defined
+interface PartialCurrencySuggestion {
+  amount: number;
+  from: string;
+  to: string;
+  suggestedQuery: string;
+}
+
 // Common currency aliases
 const CURRENCY_ALIASES: Record<string, string> = {
   // Names to codes
@@ -129,6 +382,59 @@ const CURRENCY_ALIASES: Record<string, string> = {
   dkk: "DKK", pln: "PLN", czk: "CZK", huf: "HUF", ils: "ILS",
   thb: "THB", myr: "MYR", php: "PHP", idr: "IDR",
 };
+
+// Get all currency names/aliases for fuzzy matching
+function getAllCurrencyNames(): string[] {
+  return Object.keys(CURRENCY_ALIASES);
+}
+
+// Parse partial currency query and suggest completion to USD (global standard)
+function parsePartialCurrencyQuery(query: string): PartialCurrencySuggestion | null {
+  const cleaned = query.toLowerCase().trim();
+
+  // Match patterns like "10 yen" or "10yen" (number followed by currency name)
+  const match = cleaned.match(/^([\d.,]+)\s*([a-z]+)$/);
+  if (!match) return null;
+
+  const amount = parseFloat(match[1].replace(",", "."));
+  if (isNaN(amount) || amount <= 0) return null;
+
+  const partialCurrency = match[2];
+  if (partialCurrency.length < 2) return null;
+
+  // Find matching currencies that start with the partial input
+  const allCurrencies = getAllCurrencyNames();
+  const matches = allCurrencies.filter(c => c.startsWith(partialCurrency) && c !== partialCurrency);
+
+  // Also check for exact matches (e.g., "yen" is complete)
+  const exactMatch = CURRENCY_ALIASES[partialCurrency];
+
+  if (matches.length === 0 && !exactMatch) return null;
+
+  // Prefer exact match, otherwise use the first partial match
+  let currencyName: string;
+  if (exactMatch) {
+    currencyName = partialCurrency;
+  } else {
+    // Sort by length (prefer shorter names) and take the first
+    matches.sort((a, b) => a.length - b.length);
+    currencyName = matches[0];
+  }
+
+  const fromCode = CURRENCY_ALIASES[currencyName];
+  if (!fromCode) return null;
+
+  // Default target is USD (global standard), unless from is USD then use EUR
+  const toCode = fromCode === "USD" ? "EUR" : "USD";
+  const toName = toCode.toLowerCase();
+
+  return {
+    amount,
+    from: fromCode,
+    to: toCode,
+    suggestedQuery: `${amount} ${currencyName} to ${toName}`,
+  };
+}
 
 // Parse currency query like "20 usd in yen" or "100 eur to usd"
 function parseCurrencyQuery(query: string): CurrencyQuery | null {
@@ -233,9 +539,7 @@ function App() {
   // Currency converter state
   const [currencyResult, setCurrencyResult] = useState<CurrencyResult | null>(null);
   const [currencyLoading, setCurrencyLoading] = useState(false);
-  const [currencyError, setCurrencyError] = useState<string | null>(null);
   const [lastCurrencyQuery, setLastCurrencyQuery] = useState<string>("");
-  const [currencyUpdatedAt, setCurrencyUpdatedAt] = useState<Date | null>(null);
 
   // Quick Translation state
   const [showTranslation, setShowTranslation] = useState(false);
@@ -245,6 +549,9 @@ function App() {
   const [targetLanguage] = useState("en");
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
+
+  // Quick result state (calculator, unit conversion, currency)
+  const [quickResult, setQuickResult] = useState<QuickResult | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -406,7 +713,6 @@ function App() {
       setPortProcesses([]);
       setScannedPort(null);
       setCurrencyResult(null);
-      setCurrencyError(null);
       setLastCurrencyQuery("");
       setShowTranslation(false);
       setTranslationInput("");
@@ -427,8 +733,8 @@ function App() {
     if (query.trim() === "") {
       setFilteredTools(tools);
       setSelectedIndex(0);
+      setQuickResult(null);
       setCurrencyResult(null);
-      setCurrencyError(null);
       setLastCurrencyQuery("");
     } else {
       const q = query.toLowerCase();
@@ -441,12 +747,44 @@ function App() {
       setFilteredTools(filtered);
       setSelectedIndex(0);
 
+      // Check for calculator result first
+      const calcResult = evaluateExpression(query);
+      if (calcResult) {
+        setQuickResult({
+          type: "calculator",
+          query: query,
+          result: calcResult,
+          icon: Calculator,
+          copyValue: calcResult.replace(/\./g, "").replace(/,/g, "."), // Convert from de-DE format to number
+        });
+        setCurrencyResult(null);
+        return;
+      }
+
+      // Check for unit conversion
+      const unitResult = parseUnitQuery(query);
+      if (unitResult) {
+        const formattedResult = unitResult.result.toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 3,
+        });
+        setQuickResult({
+          type: "unit",
+          query: query,
+          result: `${formattedResult} ${unitResult.toUnit}`,
+          icon: Ruler,
+          copyValue: unitResult.result.toString(),
+        });
+        setCurrencyResult(null);
+        return;
+      }
+
       // Check for currency query
       const currencyQuery = parseCurrencyQuery(query);
       if (currencyQuery && query !== lastCurrencyQuery) {
         setLastCurrencyQuery(query);
         setCurrencyLoading(true);
-        setCurrencyError(null);
+        setQuickResult(null);
         invoke<CurrencyResult>("convert_currency", {
           amount: currencyQuery.amount,
           from: currencyQuery.from,
@@ -454,17 +792,97 @@ function App() {
         })
           .then((result) => {
             setCurrencyResult(result);
-            setCurrencyUpdatedAt(new Date());
             setCurrencyLoading(false);
+            // Set quick result for currency
+            const formattedResult = result.result.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+            setQuickResult({
+              type: "currency",
+              query: query,
+              result: `${formattedResult} ${result.to}`,
+              icon: DollarSign,
+              copyValue: result.result.toFixed(2),
+            });
           })
-          .catch((err) => {
-            setCurrencyError(String(err));
+          .catch(() => {
             setCurrencyResult(null);
             setCurrencyLoading(false);
+            setQuickResult(null);
           });
+      } else if (currencyQuery && currencyResult) {
+        // Keep existing currency quick result
+        const formattedResult = currencyResult.result.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        setQuickResult({
+          type: "currency",
+          query: query,
+          result: `${formattedResult} ${currencyResult.to}`,
+          icon: DollarSign,
+          copyValue: currencyResult.result.toFixed(2),
+        });
       } else if (!currencyQuery) {
         setCurrencyResult(null);
-        setCurrencyError(null);
+
+        // No exact match found - check for partial queries and show preview
+        // Check for partial unit query (e.g., "10 fahr" → "10 fahrenheit to celsius")
+        const partialUnit = parsePartialUnitQuery(query);
+        if (partialUnit) {
+          // Compute the result for the suggested query
+          const suggestedResult = parseUnitQuery(partialUnit.suggestedQuery);
+          if (suggestedResult) {
+            const formattedResult = suggestedResult.result.toLocaleString("en-US", {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 3,
+            });
+            setQuickResult({
+              type: "unit",
+              query: partialUnit.suggestedQuery,
+              result: `${formattedResult} ${suggestedResult.toUnit}`,
+              icon: Ruler,
+              copyValue: suggestedResult.result.toString(),
+              isPreview: true,
+            });
+            return;
+          }
+        }
+
+        // Check for partial currency query (e.g., "10 yen" → "10 yen to usd")
+        const partialCurrency = parsePartialCurrencyQuery(query);
+        if (partialCurrency) {
+          // Show loading state for currency preview
+          setCurrencyLoading(true);
+          invoke<CurrencyResult>("convert_currency", {
+            amount: partialCurrency.amount,
+            from: partialCurrency.from,
+            to: partialCurrency.to,
+          })
+            .then((result) => {
+              setCurrencyLoading(false);
+              const formattedResult = result.result.toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
+              setQuickResult({
+                type: "currency",
+                query: partialCurrency.suggestedQuery,
+                result: `${formattedResult} ${result.to}`,
+                icon: DollarSign,
+                copyValue: result.result.toFixed(2),
+                isPreview: true,
+              });
+            })
+            .catch(() => {
+              setCurrencyLoading(false);
+              setQuickResult(null);
+            });
+          return;
+        }
+
+        setQuickResult(null);
       }
     }
   }, [query]);
@@ -483,14 +901,12 @@ function App() {
         newHeight = TRANSLATION_HEIGHT;
       } else if (showSettings) {
         newHeight = SETTINGS_HEIGHT;
-      } else if (currencyResult || currencyLoading) {
-        newHeight = CURRENCY_HEIGHT;
       }
 
       await appWindow.setSize(new LogicalSize(680, newHeight));
     };
     resizeWindow();
-  }, [showSettings, showConverter, showPortKiller, showTranslation, currencyResult, currencyLoading]);
+  }, [showSettings, showConverter, showPortKiller, showTranslation]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -589,57 +1005,22 @@ function App() {
   };
 
   const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
-  const showCurrency = (currencyResult || currencyLoading) && !showSettings && !showConverter && !showPortKiller;
-  const calculatorResult = query ? evaluateExpression(query) : null;
 
   // Global escape key handler for panels without input focus
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (showCurrency) {
-          setCurrencyResult(null);
-          setCurrencyError(null);
-          setQuery("");
-        } else if (showSettings) {
+        if (showSettings) {
           setShowSettings(false);
         }
       }
     };
 
-    if (showCurrency || showSettings) {
+    if (showSettings) {
       window.addEventListener("keydown", handleGlobalKeyDown);
       return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }
-  }, [showCurrency, showSettings]);
-
-  // Format time ago for currency update
-  const getTimeAgo = (date: Date | null) => {
-    if (!date) return "";
-    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
-    if (seconds < 60) return "Updated just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes === 1) return "Updated 1 minute ago";
-    return `Updated ${minutes} minutes ago`;
-  };
-
-  // Refresh currency rate
-  const refreshCurrency = async () => {
-    if (!currencyResult) return;
-    setCurrencyLoading(true);
-    try {
-      const result = await invoke<CurrencyResult>("convert_currency", {
-        amount: currencyResult.amount,
-        from: currencyResult.from,
-        to: currencyResult.to,
-      });
-      setCurrencyResult(result);
-      setCurrencyUpdatedAt(new Date());
-    } catch (err) {
-      setCurrencyError(String(err));
-    } finally {
-      setCurrencyLoading(false);
-    }
-  };
+  }, [showSettings]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -777,7 +1158,7 @@ function App() {
   return (
     <div className="p-2 select-none">
       {/* Command Palette - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showCurrency && (
+      {!showConverter && !showPortKiller && !showTranslation && !showSettings && (
         <div
           className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
           onMouseDown={handleDragStart}
@@ -801,15 +1182,59 @@ function App() {
               }`}
               autoFocus
             />
-            {calculatorResult && (
-              <div className="absolute right-5 top-1/2 -translate-y-1/2">
-                <span className="z-99 select-text text-buncha-text-muted text-base">= {calculatorResult}</span>
-              </div>
-            )}
           </div>
 
           {/* Results List */}
           <div className="max-h-[340px] overflow-y-auto scrollbar-hidden">
+            {/* Quick Result Display */}
+            {quickResult && (
+              <div className="py-2 border-b border-buncha-border">
+                <div className={`px-5 py-4 border-l-2 ${quickResult.isPreview ? 'bg-buncha-surface/30 border-buncha-text-muted' : 'bg-buncha-accent/5 border-buncha-accent'}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${quickResult.isPreview ? 'bg-buncha-surface/50' : 'bg-buncha-accent/10'}`}>
+                      <quickResult.icon className={`w-6 h-6 ${quickResult.isPreview ? 'text-buncha-text-muted' : 'text-buncha-accent'}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm text-buncha-text-muted">{quickResult.query}</p>
+                        {quickResult.isPreview && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-buncha-surface rounded text-buncha-text-muted">
+                            Preview
+                          </span>
+                        )}
+                      </div>
+                      <h3 className={`text-2xl font-bold ${quickResult.isPreview ? 'text-buncha-text' : 'text-buncha-accent'}`}>{quickResult.result}</h3>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await writeText(quickResult.copyValue);
+                        setStatus("Copied!");
+                        setTimeout(() => setStatus(null), 1500);
+                      }}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${quickResult.isPreview ? 'bg-buncha-surface hover:bg-buncha-surface/80 text-buncha-text-muted' : 'bg-buncha-accent/10 hover:bg-buncha-accent/20 text-buncha-accent'}`}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Currency Loading State */}
+            {currencyLoading && !quickResult && (
+              <div className="py-2 border-b border-buncha-border">
+                <div className="px-5 py-4 bg-buncha-accent/5 border-l-2 border-buncha-accent">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-buncha-accent/10">
+                      <Loader2 className="w-6 h-6 text-buncha-accent animate-spin" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-buncha-text-muted mb-1">{query}</p>
+                      <h3 className="text-2xl font-bold text-buncha-accent">Converting...</h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {filteredTools.length > 0 ? (
               <div className="py-2">
                 {filteredTools.map((tool, index) => {
@@ -852,7 +1277,7 @@ function App() {
                   );
                 })}
               </div>
-            ) : (
+            ) : !quickResult && !currencyLoading && (
               <div className="py-16 px-5 text-center">
                 <div className="w-16 h-16 rounded-full bg-buncha-surface/50 flex items-center justify-center mx-auto mb-4">
                   <Search className="w-8 h-8 text-buncha-text-muted" />
@@ -977,95 +1402,6 @@ function App() {
                 Save Settings
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Currency Conversion Panel */}
-      {showCurrency && (
-        <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
-            <div className="flex items-center">
-              <DollarSign className="w-5 h-5 text-buncha-accent mr-3" />
-              <span className="text-buncha-text text-base font-medium">Currency Conversion</span>
-            </div>
-            <button
-              onClick={() => {
-                setCurrencyResult(null);
-                setCurrencyError(null);
-                setQuery("");
-              }}
-              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="p-4">
-            {currencyLoading && !currencyResult ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-buncha-accent" />
-              </div>
-            ) : currencyError ? (
-              <div className="text-center py-8">
-                <div className="text-red-400 text-sm">{currencyError}</div>
-              </div>
-            ) : currencyResult && (
-              <>
-                {/* From section */}
-                <div className="text-buncha-text-muted text-sm mb-2">From</div>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
-                    <span className="text-buncha-text text-lg select-text">{currencyResult.amount.toLocaleString()}</span>
-                  </div>
-                  <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
-                    <span className="text-buncha-text font-medium select-text">{currencyResult.from}</span>
-                  </div>
-                </div>
-
-                {/* Arrow */}
-                <div className="flex justify-center my-2">
-                  <div className="w-8 h-8 rounded-full bg-buncha-surface border border-buncha-border flex items-center justify-center">
-                    <ArrowDown className="w-4 h-4 text-buncha-text-muted" />
-                  </div>
-                </div>
-
-                {/* To section */}
-                <div className="text-buncha-text-muted text-sm mb-2">To</div>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="flex-1 bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3">
-                    <span className="text-buncha-accent text-lg font-medium select-text">
-                      {currencyResult.result.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="bg-buncha-surface border border-buncha-border rounded-lg px-4 py-3 min-w-[80px] text-center">
-                    <span className="text-buncha-text font-medium select-text">{currencyResult.to}</span>
-                  </div>
-                </div>
-
-                {/* Rate info */}
-                <div className="flex items-center justify-between p-3 bg-buncha-surface rounded-lg border border-buncha-border">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-buncha-accent/20 flex items-center justify-center">
-                      <TrendingUp className="w-4 h-4 text-buncha-accent" />
-                    </div>
-                    <div>
-                      <div className="text-buncha-text text-sm select-text">
-                        1 {currencyResult.from} = {currencyResult.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {currencyResult.to}
-                      </div>
-                      <div className="text-buncha-text-muted text-xs">{getTimeAgo(currencyUpdatedAt)}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={refreshCurrency}
-                    disabled={currencyLoading}
-                    className="text-buncha-text-muted hover:text-buncha-text cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-5 h-5 ${currencyLoading ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       )}
