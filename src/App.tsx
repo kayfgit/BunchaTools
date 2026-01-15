@@ -681,14 +681,10 @@ function App() {
     },
   ];
 
-  // Mark window ready and load settings on mount
+  // Load settings on mount
   useEffect(() => {
     const initialize = async () => {
       try {
-        // Mark window as ready first - this enables hotkey and tray interactions
-        await invoke("mark_window_ready");
-
-        // Then load settings
         const s = await invoke<Settings>("get_settings");
         setSettings(s);
       } catch (e) {

@@ -52,7 +52,6 @@ struct AppState {
     settings: Mutex<Settings>,
     auto_hide_enabled: Mutex<bool>,
     is_dragging: Mutex<bool>,
-    window_ready: Mutex<bool>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -252,13 +251,6 @@ fn set_auto_hide(app: AppHandle, enabled: bool) {
 fn set_dragging(app: AppHandle, dragging: bool) {
     let state = app.state::<AppState>();
     *state.is_dragging.lock().unwrap() = dragging;
-}
-
-#[tauri::command]
-fn mark_window_ready(app: AppHandle) {
-    let state = app.state::<AppState>();
-    *state.window_ready.lock().unwrap() = true;
-    log::info!("Window marked as ready");
 }
 
 #[tauri::command]
@@ -1013,19 +1005,12 @@ async fn translate_text(text: String, target_lang: String) -> Result<Translation
 }
 
 fn toggle_window(app: &AppHandle) {
-    // Check if window is ready before attempting to toggle
-    let state = app.state::<AppState>();
-    let is_ready = *state.window_ready.lock().unwrap();
-    if !is_ready {
-        log::warn!("Window not ready yet, ignoring toggle request");
-        return;
-    }
-
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
             // Check for saved position
+            let state = app.state::<AppState>();
             let settings = state.settings.lock().unwrap();
             if let Some((x, y)) = settings.window_position {
                 use tauri::LogicalPosition;
@@ -1053,7 +1038,6 @@ pub fn run() {
             settings: Mutex::new(Settings::default()),
             auto_hide_enabled: Mutex::new(true),
             is_dragging: Mutex::new(false),
-            window_ready: Mutex::new(false),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1123,7 +1107,12 @@ pub fn run() {
                             let current_shortcut = state.current_shortcut.lock().unwrap().clone();
                             if let Some(current) = current_shortcut {
                                 if shortcut == &current {
-                                    toggle_window(&app_handle);
+                                    // Spawn on async runtime to avoid blocking the shortcut handler thread.
+                                    // This prevents deadlocks with the Windows message loop.
+                                    let app_handle_clone = app_handle.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        toggle_window(&app_handle_clone);
+                                    });
                                 }
                             }
                         }
@@ -1143,6 +1132,12 @@ pub fn run() {
             // Handle window events - use if let to avoid panic if window isn't ready
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
+
+                // Force-initialize window by showing and immediately hiding.
+                // This ensures all Windows lazy-initialization is completed before
+                // any hotkey can trigger window operations, preventing deadlocks.
+                let _ = window.show();
+                let _ = window.hide();
 
                 let window_clone = window.clone();
                 let app_handle_for_blur = app.handle().clone();
@@ -1182,7 +1177,6 @@ pub fn run() {
             get_launch_at_startup,
             set_auto_hide,
             set_dragging,
-            mark_window_ready,
             save_window_position,
             convert_image,
             convert_media,
