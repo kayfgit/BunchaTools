@@ -101,6 +101,201 @@ interface TranslationResult {
   target_language: string;
 }
 
+// Color formats for color picker
+interface ColorFormats {
+  hex: string;
+  rgb: string;
+  hsl: string;
+  hsv: string;
+  oklch: string;
+  cmyk: string;
+  lab: string;
+  xyz: string;
+}
+
+// Color conversion utilities
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : { r: 0, g: 0, b: 0 };
+}
+
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        break;
+      case g:
+        h = ((b - r) / d + 2) / 6;
+        break;
+      case b:
+        h = ((r - g) / d + 4) / 6;
+        break;
+    }
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+function rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  const v = max;
+  const d = max - min;
+  const s = max === 0 ? 0 : d / max;
+
+  if (max !== min) {
+    switch (max) {
+      case r:
+        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        break;
+      case g:
+        h = ((b - r) / d + 2) / 6;
+        break;
+      case b:
+        h = ((r - g) / d + 4) / 6;
+        break;
+    }
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), v: Math.round(v * 100) };
+}
+
+function rgbToXyz(r: number, g: number, b: number): { x: number; y: number; z: number } {
+  let rr = r / 255;
+  let gg = g / 255;
+  let bb = b / 255;
+
+  rr = rr > 0.04045 ? Math.pow((rr + 0.055) / 1.055, 2.4) : rr / 12.92;
+  gg = gg > 0.04045 ? Math.pow((gg + 0.055) / 1.055, 2.4) : gg / 12.92;
+  bb = bb > 0.04045 ? Math.pow((bb + 0.055) / 1.055, 2.4) : bb / 12.92;
+
+  rr *= 100;
+  gg *= 100;
+  bb *= 100;
+
+  return {
+    x: Math.round(rr * 0.4124 + gg * 0.3576 + bb * 0.1805),
+    y: Math.round(rr * 0.2126 + gg * 0.7152 + bb * 0.0722),
+    z: Math.round(rr * 0.0193 + gg * 0.1192 + bb * 0.9505),
+  };
+}
+
+function rgbToLab(r: number, g: number, b: number): { l: number; a: number; b: number } {
+  const xyz = rgbToXyz(r, g, b);
+  let x = xyz.x / 95.047;
+  let y = xyz.y / 100.0;
+  let z = xyz.z / 108.883;
+
+  x = x > 0.008856 ? Math.pow(x, 1 / 3) : 7.787 * x + 16 / 116;
+  y = y > 0.008856 ? Math.pow(y, 1 / 3) : 7.787 * y + 16 / 116;
+  z = z > 0.008856 ? Math.pow(z, 1 / 3) : 7.787 * z + 16 / 116;
+
+  return {
+    l: Math.round(116 * y - 16),
+    a: Math.round(500 * (x - y)),
+    b: Math.round(200 * (y - z)),
+  };
+}
+
+function rgbToCmyk(r: number, g: number, b: number): { c: number; m: number; y: number; k: number } {
+  if (r === 0 && g === 0 && b === 0) {
+    return { c: 0, m: 0, y: 0, k: 100 };
+  }
+
+  const rr = r / 255;
+  const gg = g / 255;
+  const bb = b / 255;
+
+  const k = 1 - Math.max(rr, gg, bb);
+  const c = (1 - rr - k) / (1 - k);
+  const m = (1 - gg - k) / (1 - k);
+  const y = (1 - bb - k) / (1 - k);
+
+  return {
+    c: Math.round(c * 100),
+    m: Math.round(m * 100),
+    y: Math.round(y * 100),
+    k: Math.round(k * 100),
+  };
+}
+
+function rgbToOklch(r: number, g: number, b: number): { l: number; c: number; h: number } {
+  // Convert RGB to linear RGB
+  const toLinear = (c: number) => {
+    c /= 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+
+  const lr = toLinear(r);
+  const lg = toLinear(g);
+  const lb = toLinear(b);
+
+  // RGB to OKLab
+  const l_ = 0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb;
+  const m_ = 0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb;
+  const s_ = 0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb;
+
+  const l__ = Math.cbrt(l_);
+  const m__ = Math.cbrt(m_);
+  const s__ = Math.cbrt(s_);
+
+  const L = 0.2104542553 * l__ + 0.793617785 * m__ - 0.0040720468 * s__;
+  const a = 1.9779984951 * l__ - 2.428592205 * m__ + 0.4505937099 * s__;
+  const bb_ = 0.0259040371 * l__ + 0.7827717662 * m__ - 0.808675766 * s__;
+
+  // OKLab to OKLCH
+  const C = Math.sqrt(a * a + bb_ * bb_);
+  let H = Math.atan2(bb_, a) * (180 / Math.PI);
+  if (H < 0) H += 360;
+
+  return {
+    l: Math.round(L * 100),
+    c: parseFloat(C.toFixed(2)),
+    h: Math.round(H),
+  };
+}
+
+function convertHexToFormats(hex: string): ColorFormats {
+  const rgb = hexToRgb(hex);
+  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+  const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  const xyz = rgbToXyz(rgb.r, rgb.g, rgb.b);
+  const lab = rgbToLab(rgb.r, rgb.g, rgb.b);
+  const cmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b);
+  const oklch = rgbToOklch(rgb.r, rgb.g, rgb.b);
+
+  return {
+    hex: hex.toUpperCase(),
+    rgb: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+    hsl: `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`,
+    hsv: `hsv(${hsv.h}, ${hsv.s}%, ${hsv.v}%)`,
+    oklch: `oklch(${oklch.l}% ${oklch.c} ${oklch.h})`,
+    cmyk: `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`,
+    lab: `lab(${lab.l}% ${lab.a} ${lab.b})`,
+    xyz: `xyz(${xyz.x}%, ${xyz.y}%, ${xyz.z}%)`,
+  };
+}
+
 // Language code to name mapping
 const LANGUAGE_NAMES: Record<string, string> = {
   en: "English",
@@ -565,6 +760,11 @@ function App() {
   // Quick result state (calculator, unit conversion, currency)
   const [quickResult, setQuickResult] = useState<QuickResult | null>(null);
 
+  // Color Picker Details state
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [pickedColor, setPickedColor] = useState<ColorFormats | null>(null);
+  const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
+
   // Define tools
   const tools: Tool[] = [
     {
@@ -576,9 +776,13 @@ function App() {
       action: async () => {
         try {
           const color = await invoke<string>("pick_color");
-          await writeText(color);
-          setStatus(`Copied ${color}`);
-          setTimeout(() => setStatus(null), 2000);
+          const formats = convertHexToFormats(color);
+          setPickedColor(formats);
+          setCopiedFormat(null);
+          setShowColorPicker(true);
+          setQuery("");
+          await invoke("set_auto_hide", { enabled: true });
+          await invoke("show_window");
         } catch (e) {
           if (e !== "Cancelled") {
             console.error("Color picker error:", e);
@@ -728,6 +932,9 @@ function App() {
       setDetectedLanguage("Detecting...");
       setTranslationError(null);
       setIsTranslationSettingsOpen(false);
+      setShowColorPicker(false);
+      setPickedColor(null);
+      setCopiedFormat(null);
       inputRef.current?.focus();
     });
 
@@ -901,6 +1108,7 @@ function App() {
     const resizeWindow = async () => {
       const appWindow = getCurrentWindow();
       let height = 500; // Default height for command palette
+      let width = 680; // Default width
 
       if (showConverter) {
         height = 450;
@@ -910,12 +1118,15 @@ function App() {
         height = isTranslationSettingsOpen ? 480 : 400;
       } else if (showSettings) {
         height = 280;
+      } else if (showColorPicker) {
+        height = 600;
+        width = 880;
       }
 
-      await appWindow.setSize(new LogicalSize(680, height));
+      await appWindow.setSize(new LogicalSize(width, height));
     };
     resizeWindow();
-  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen]);
+  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -1030,6 +1241,26 @@ function App() {
       return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }
   }, [showSettings]);
+
+  // Color picker escape key handler
+  useEffect(() => {
+    if (!showColorPicker) return;
+
+    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowColorPicker(false);
+        setPickedColor(null);
+        setCopiedFormat(null);
+        await invoke("hide_window");
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeyDown);
+    };
+  }, [showColorPicker]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -1167,7 +1398,7 @@ function App() {
   return (
     <div className="p-2 select-none">
       {/* Command Palette - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && !showTranslation && !showSettings && (
+      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && (
         <div
           className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
           onMouseDown={handleDragStart}
@@ -1866,6 +2097,106 @@ function App() {
             <p className="text-xs text-buncha-text-muted text-center">
               Translation powered by MyMemory
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Color Picker Details Panel */}
+      {showColorPicker && pickedColor && (
+        <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
+          {/* Header */}
+          <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
+            <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
+              <Pipette className="w-4 h-4" />
+              <span>Color Details</span>
+            </div>
+          </div>
+
+          {/* Content - Two Column Layout */}
+          <div className="p-6 flex gap-8">
+            {/* Left Side - Color Preview */}
+            <div className="flex-shrink-0 w-80">
+              <div className="relative group">
+                <div
+                  className="w-full rounded-xl shadow-lg transition-transform duration-300 group-hover:scale-[1.02]"
+                  style={{ backgroundColor: pickedColor.hex, minHeight: "420px" }}
+                />
+                <div className="absolute inset-0 rounded-xl ring-1 ring-black/10" />
+
+                {/* Color Info Overlay */}
+                <div className="absolute bottom-4 left-4 right-4 bg-black/60 backdrop-blur-md rounded-lg p-4 border border-white/10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-white/60 mb-1">Primary Color</p>
+                      <p className="text-2xl font-mono font-semibold text-white">{pickedColor.hex}</p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await writeText(pickedColor.hex);
+                        setCopiedFormat("preview");
+                        setTimeout(() => setCopiedFormat(null), 2000);
+                      }}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                    >
+                      {copiedFormat === "preview" ? (
+                        <Check className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <Copy className="w-5 h-5 text-white/80" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Side - Color Formats */}
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-buncha-text-muted mb-4">Available Formats</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "HEX", value: pickedColor.hex, description: "Hexadecimal" },
+                  { label: "RGB", value: pickedColor.rgb, description: "Red Green Blue" },
+                  { label: "HSL", value: pickedColor.hsl, description: "Hue Saturation Lightness" },
+                  { label: "HSV", value: pickedColor.hsv, description: "Hue Saturation Value" },
+                  { label: "OKLCH", value: pickedColor.oklch, description: "Perceptual color space" },
+                  { label: "CMYK", value: pickedColor.cmyk, description: "Cyan Magenta Yellow Black" },
+                  { label: "LAB", value: pickedColor.lab, description: "Lightness A B" },
+                  { label: "XYZ", value: pickedColor.xyz, description: "CIE XYZ color space" },
+                ].map((format) => (
+                  <div
+                    key={format.label}
+                    className="group/format bg-buncha-surface/30 hover:bg-buncha-surface/50 border border-buncha-border hover:border-buncha-accent/50 rounded-lg py-2 pl-3 pr-6 transition-all duration-200 cursor-pointer"
+                    onClick={async () => {
+                      await writeText(format.value);
+                      setCopiedFormat(format.label);
+                      setTimeout(() => setCopiedFormat(null), 2000);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-sm font-bold text-buncha-accent">{format.label}</span>
+                          {copiedFormat === format.label && <Check className="w-3 h-3 text-green-500 flex-shrink-0" />}
+                        </div>
+                        <p className="text-xs text-buncha-text-muted mb-2">{format.description}</p>
+                        <p className="font-mono text-sm text-buncha-text truncate">{format.value}</p>
+                      </div>
+                      <button
+                        className="p-1.5 hover:bg-buncha-bg rounded-lg transition-colors opacity-0 group-hover/format:opacity-100 flex-shrink-0 cursor-pointer"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await writeText(format.value);
+                          setCopiedFormat(format.label);
+                          setTimeout(() => setCopiedFormat(null), 2000);
+                        }}
+                      >
+                        <Copy className="w-3.5 h-3.5 text-buncha-text-muted" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
