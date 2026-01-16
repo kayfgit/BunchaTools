@@ -1017,6 +1017,16 @@ async fn translate_text(text: String, target_lang: String) -> Result<Translation
     })
 }
 
+#[tauri::command]
+async fn save_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
+    fs::write(&path, &data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_text_file(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content).map_err(|e| e.to_string())
+}
+
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -1205,7 +1215,9 @@ pub fn run() {
             kill_port_process,
             convert_currency,
             start_text_selection,
-            translate_text
+            translate_text,
+            save_binary_file,
+            save_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
