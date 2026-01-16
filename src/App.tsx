@@ -2905,9 +2905,18 @@ function App() {
                     <button
                       onClick={async () => {
                         if (qrImageDataUrl) {
-                          await writeText(qrImageDataUrl);
-                          setQRCopied(true);
-                          setTimeout(() => setQRCopied(false), 2000);
+                          try {
+                            // Convert data URL to blob and copy as image
+                            const response = await fetch(qrImageDataUrl);
+                            const blob = await response.blob();
+                            await navigator.clipboard.write([
+                              new ClipboardItem({ "image/png": blob })
+                            ]);
+                            setQRCopied(true);
+                            setTimeout(() => setQRCopied(false), 2000);
+                          } catch (err) {
+                            console.error("Failed to copy image:", err);
+                          }
                         }
                       }}
                       disabled={!qrImageDataUrl}
