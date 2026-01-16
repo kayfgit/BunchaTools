@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     window::Color,
     AppHandle, Emitter, Manager,
 };
@@ -33,6 +33,12 @@ pub struct Settings {
     pub launch_at_startup: bool,
     #[serde(default)]
     pub window_position: Option<(i32, i32)>, // Saved window position (x, y)
+    #[serde(default = "default_show_in_tray")]
+    pub show_in_tray: bool,
+}
+
+fn default_show_in_tray() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -42,6 +48,7 @@ impl Default for Settings {
             hotkey_key: "Q".to_string(),
             launch_at_startup: false,
             window_position: None,
+            show_in_tray: true,
         }
     }
 }
@@ -52,6 +59,7 @@ struct AppState {
     settings: Mutex<Settings>,
     auto_hide_enabled: Mutex<bool>,
     is_dragging: Mutex<bool>,
+    tray_handle: Mutex<Option<TrayIcon>>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -184,6 +192,11 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     // Update startup setting
     #[cfg(windows)]
     set_launch_at_startup_internal(settings.launch_at_startup)?;
+
+    // Update tray visibility
+    if let Some(tray) = state.tray_handle.lock().unwrap().as_ref() {
+        let _ = tray.set_visible(settings.show_in_tray);
+    }
 
     Ok(())
 }
@@ -1038,6 +1051,7 @@ pub fn run() {
             settings: Mutex::new(Settings::default()),
             auto_hide_enabled: Mutex::new(true),
             is_dragging: Mutex::new(false),
+            tray_handle: Mutex::new(None),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1074,7 +1088,7 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
-            let _tray = TrayIconBuilder::with_id("main-tray")
+            let tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("BunchaTools")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -1095,6 +1109,13 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Store tray handle and set initial visibility based on settings
+            {
+                let state = app.state::<AppState>();
+                let _ = tray.set_visible(settings.show_in_tray);
+                *state.tray_handle.lock().unwrap() = Some(tray);
+            }
 
             // Register global shortcut with handler
             let app_handle = app.handle().clone();

@@ -47,6 +47,9 @@ interface Settings {
   hotkey_modifiers: string[];
   hotkey_key: string;
   launch_at_startup: boolean;
+  show_in_tray: boolean;
+  automatic_updates: boolean;
+  theme: "dark" | "light" | "system";
 }
 
 // Format options for converter
@@ -721,10 +724,15 @@ function App() {
     hotkey_modifiers: ["Alt"],
     hotkey_key: "Q",
     launch_at_startup: false,
+    show_in_tray: true,
+    automatic_updates: false,
+    theme: "dark",
   });
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const settingsInitialized = useRef(false);
 
   // Converter state
   const [showConverter, setShowConverter] = useState(false);
@@ -797,7 +805,7 @@ function App() {
       icon: Repeat2,
       keywords: ["convert", "converter", "video", "audio", "image", "mp4", "mp3", "png", "jpg", "wav", "gif", "webp", "avi", "mkv"],
       action: async () => {
-        await invoke("set_auto_hide", { enabled: false });
+        await invoke("set_auto_hide", { enabled: true });
         setShowConverter(true);
         setConverterType(null);
         setSelectedFile(null);
@@ -812,7 +820,7 @@ function App() {
       icon: Network,
       keywords: ["port", "kill", "process", "free", "localhost", "server", "3000", "8080", "1420", "network", "tcp"],
       action: async () => {
-        await invoke("set_auto_hide", { enabled: false });
+        await invoke("set_auto_hide", { enabled: true });
         setShowPortKiller(true);
         setPortInput("");
         setPortProcesses([]);
@@ -891,12 +899,31 @@ function App() {
       try {
         const s = await invoke<Settings>("get_settings");
         setSettings(s);
+        // Mark as initialized after a tick to avoid triggering auto-save
+        setTimeout(() => {
+          settingsInitialized.current = true;
+        }, 0);
       } catch (e) {
         console.error("Failed to initialize:", e);
       }
     };
     initialize();
   }, []);
+
+  // Auto-save settings when they change
+  useEffect(() => {
+    if (!settingsInitialized.current) return;
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        await invoke("save_settings", { settings });
+      } catch (e) {
+        console.error("Failed to auto-save settings:", e);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [settings]);
 
   // Listen for conversion progress events
   useEffect(() => {
@@ -1117,7 +1144,7 @@ function App() {
       } else if (showTranslation) {
         height = isTranslationSettingsOpen ? 480 : 400;
       } else if (showSettings) {
-        height = 280;
+        height = 460;
       } else if (showColorPicker) {
         height = 600;
         width = 880;
@@ -1141,13 +1168,11 @@ function App() {
   const handleKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       if (showConverter) {
-        await invoke("set_auto_hide", { enabled: true });
         setShowConverter(false);
         setConverterType(null);
         setSelectedFile(null);
         setTargetFormat(null);
       } else if (showPortKiller) {
-        await invoke("set_auto_hide", { enabled: true });
         setShowPortKiller(false);
         setPortInput("");
         setPortProcesses([]);
@@ -1178,6 +1203,7 @@ function App() {
 
   const handleHotkeyKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
+    e.stopPropagation();
 
     if (e.key === "Escape") {
       setIsRecordingHotkey(false);
@@ -1190,19 +1216,71 @@ function App() {
     if (e.shiftKey) modifiers.push("Shift");
     if (e.metaKey) modifiers.push("Win");
 
-    // Get the actual key (not modifier keys)
-    const key = e.key.toUpperCase();
-    if (["CONTROL", "ALT", "SHIFT", "META"].includes(key)) {
-      return; // Wait for actual key
+    // Use e.code for reliable key detection (works better with Alt combinations)
+    const code = e.code;
+    let mappedKey = "";
+
+    // Handle letter keys (KeyA, KeyB, etc.)
+    if (code.startsWith("Key")) {
+      mappedKey = code.substring(3); // "KeyQ" -> "Q"
+    }
+    // Handle digit keys (Digit0, Digit1, etc.)
+    else if (code.startsWith("Digit")) {
+      mappedKey = code.substring(5); // "Digit1" -> "1"
+    }
+    // Handle numpad keys
+    else if (code.startsWith("Numpad") && code.length > 6) {
+      const numpadPart = code.substring(6);
+      if (/^\d$/.test(numpadPart)) {
+        mappedKey = "Num" + numpadPart;
+      } else {
+        mappedKey = "Num" + numpadPart;
+      }
+    }
+    // Handle function keys
+    else if (/^F\d{1,2}$/.test(code)) {
+      mappedKey = code;
+    }
+    // Handle special keys
+    else {
+      const specialKeys: Record<string, string> = {
+        Space: "Space",
+        Enter: "Enter",
+        Tab: "Tab",
+        Backspace: "Backspace",
+        Delete: "Delete",
+        Insert: "Insert",
+        Home: "Home",
+        End: "End",
+        PageUp: "PageUp",
+        PageDown: "PageDown",
+        ArrowUp: "Up",
+        ArrowDown: "Down",
+        ArrowLeft: "Left",
+        ArrowRight: "Right",
+        Backquote: "`",
+        Minus: "-",
+        Equal: "=",
+        BracketLeft: "[",
+        BracketRight: "]",
+        Backslash: "\\",
+        Semicolon: ";",
+        Quote: "'",
+        Comma: ",",
+        Period: ".",
+        Slash: "/",
+      };
+      mappedKey = specialKeys[code] || "";
     }
 
-    // Map special keys
-    let mappedKey = key;
-    if (key === " ") mappedKey = "Space";
-    else if (key.length === 1) mappedKey = key;
-    else if (key.startsWith("F") && key.length <= 3) mappedKey = key;
+    // Skip if only modifiers were pressed or no valid key
+    if (!mappedKey || ["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"].includes(code)) {
+      return;
+    }
 
-    if (modifiers.length > 0 || ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"].includes(mappedKey)) {
+    // Require at least one modifier for non-function keys
+    const isFunctionKey = /^F\d{1,2}$/.test(mappedKey);
+    if (modifiers.length > 0 || isFunctionKey) {
       setSettings((prev) => ({
         ...prev,
         hotkey_modifiers: modifiers,
@@ -1212,19 +1290,36 @@ function App() {
     }
   };
 
-  const saveSettings = async () => {
-    try {
-      await invoke("save_settings", { settings });
-      setStatus("Settings saved!");
-      setTimeout(() => setStatus(null), 2000);
-    } catch (e) {
-      console.error("Failed to save settings:", e);
-      setStatus("Failed to save settings");
-      setTimeout(() => setStatus(null), 2000);
+  // Handle mouse buttons for hotkey recording (side buttons)
+  const handleHotkeyMouseDown = (e: React.MouseEvent) => {
+    // Only handle extra buttons (side buttons are typically 3 and 4)
+    if (e.button < 3) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const modifiers: string[] = [];
+    if (e.altKey) modifiers.push("Alt");
+    if (e.ctrlKey) modifiers.push("Ctrl");
+    if (e.shiftKey) modifiers.push("Shift");
+    if (e.metaKey) modifiers.push("Win");
+
+    // Map mouse buttons to names
+    const mouseButtonNames: Record<number, string> = {
+      3: "Mouse4", // Back button
+      4: "Mouse5", // Forward button
+    };
+
+    const buttonName = mouseButtonNames[e.button];
+    if (buttonName) {
+      setSettings((prev) => ({
+        ...prev,
+        hotkey_modifiers: modifiers,
+        hotkey_key: buttonName,
+      }));
+      setIsRecordingHotkey(false);
     }
   };
-
-  const hotkeyDisplay = [...settings.hotkey_modifiers, settings.hotkey_key].join(" + ");
 
   // Global escape key handler for panels without input focus
   useEffect(() => {
@@ -1242,7 +1337,7 @@ function App() {
     }
   }, [showSettings]);
 
-  // Color picker escape key handler
+  // Color picker escape key and blur handler
   useEffect(() => {
     if (!showColorPicker) return;
 
@@ -1255,12 +1350,63 @@ function App() {
       }
     };
 
+    const handleBlur = () => {
+      // Only reset state if not dragging (dragging causes temporary blur)
+      if (!isDraggingRef.current) {
+        setShowColorPicker(false);
+        setPickedColor(null);
+        setCopiedFormat(null);
+      }
+    };
+
     window.addEventListener("keydown", handleGlobalKeyDown);
+    window.addEventListener("blur", handleBlur);
 
     return () => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [showColorPicker]);
+
+  // Omni Converter blur handler (prevents flickering on reopen)
+  useEffect(() => {
+    if (!showConverter) return;
+
+    const handleBlur = () => {
+      if (!isDraggingRef.current) {
+        setShowConverter(false);
+        setConverterType(null);
+        setSelectedFile(null);
+        setTargetFormat(null);
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showConverter]);
+
+  // Port Killer blur handler (prevents flickering on reopen)
+  useEffect(() => {
+    if (!showPortKiller) return;
+
+    const handleBlur = () => {
+      if (!isDraggingRef.current) {
+        setShowPortKiller(false);
+        setPortInput("");
+        setPortProcesses([]);
+        setScannedPort(null);
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showPortKiller]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -1300,12 +1446,14 @@ function App() {
     if (!target.closest('[data-drag-region]') || target.closest('button, input')) return;
 
     // Set dragging flag to prevent auto-hide during drag
+    isDraggingRef.current = true;
     await invoke("set_dragging", { dragging: true });
 
     try {
       await getCurrentWindow().startDragging();
     } finally {
       // Clear dragging flag after drag ends
+      isDraggingRef.current = false;
       await invoke("set_dragging", { dragging: false });
     }
   };
@@ -1563,10 +1711,10 @@ function App() {
       {showSettings && (
         <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
-            <div className="flex items-center">
-              <SettingsIcon className="w-5 h-5 text-buncha-accent mr-3" />
-              <span className="text-buncha-text text-base font-medium">Settings</span>
+          <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-between" data-drag-region>
+            <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
+              <SettingsIcon className="w-4 h-4" />
+              <span>Settings</span>
             </div>
             <button
               onClick={() => setShowSettings(false)}
@@ -1575,40 +1723,43 @@ function App() {
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="p-4 space-y-4">
-            {/* Hotkey Setting */}
-            <div className="flex items-center justify-between">
+          <div className="p-4 space-y-1">
+            {/* Keyboard Shortcut */}
+            <div className="flex items-center justify-between py-3">
               <div>
-                <div className="text-buncha-text text-sm font-medium">Hotkey</div>
-                <div className="text-buncha-text-muted text-xs">
-                  Keyboard shortcut to open BunchaTools
-                </div>
+                <h3 className="text-buncha-text font-medium mb-0.5">Keyboard Shortcut</h3>
+                <p className="text-sm text-buncha-text-muted">Global hotkey to open command palette</p>
               </div>
               <div
                 ref={hotkeyInputRef}
                 tabIndex={0}
                 onClick={() => setIsRecordingHotkey(true)}
                 onKeyDown={isRecordingHotkey ? handleHotkeyKeyDown : undefined}
+                onMouseDown={isRecordingHotkey ? handleHotkeyMouseDown : undefined}
                 onBlur={() => setIsRecordingHotkey(false)}
-                className={`px-4 py-2 rounded-lg border min-w-32 text-center transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
                   isRecordingHotkey
-                    ? "border-buncha-accent bg-buncha-accent/20 text-buncha-accent"
-                    : "border-buncha-border bg-buncha-surface text-buncha-text hover:border-buncha-text-muted"
+                    ? "bg-buncha-accent/20 border-buncha-accent"
+                    : "bg-buncha-surface border-buncha-border hover:border-buncha-text-muted"
                 }`}
               >
-                {isRecordingHotkey ? "Press keys..." : hotkeyDisplay}
+                {isRecordingHotkey ? (
+                  <span className="text-sm text-buncha-accent">Press keys...</span>
+                ) : (
+                  [...settings.hotkey_modifiers, settings.hotkey_key].map((key, i) => (
+                    <span key={i} className="text-sm font-medium text-buncha-text">
+                      {key}
+                    </span>
+                  ))
+                )}
               </div>
             </div>
 
             {/* Launch at Startup */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-3">
               <div>
-                <div className="text-buncha-text text-sm font-medium">
-                  Launch at startup
-                </div>
-                <div className="text-buncha-text-muted text-xs">
-                  Start BunchaTools when you log in
-                </div>
+                <h3 className="text-buncha-text font-medium mb-0.5">Launch at Startup</h3>
+                <p className="text-sm text-buncha-text-muted">Automatically start when you log in</p>
               </div>
               <button
                 onClick={() =>
@@ -1617,30 +1768,100 @@ function App() {
                     launch_at_startup: !prev.launch_at_startup,
                   }))
                 }
-                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${
                   settings.launch_at_startup
                     ? "bg-buncha-accent"
                     : "bg-buncha-surface border border-buncha-border"
                 }`}
               >
                 <div
-                  className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
                     settings.launch_at_startup
-                      ? "translate-x-6"
-                      : "translate-x-0.5"
+                      ? "right-0.5"
+                      : "left-0.5"
                   }`}
                 />
               </button>
             </div>
 
-            {/* Save Button */}
-            <div className="pt-2 flex justify-end">
+            {/* Show in System Tray */}
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <h3 className="text-buncha-text font-medium mb-0.5">Show in System Tray</h3>
+                <p className="text-sm text-buncha-text-muted">Display icon in Windows notification area</p>
+              </div>
               <button
-                onClick={saveSettings}
-                className="px-4 py-2 bg-buncha-accent text-white rounded-lg text-sm font-medium hover:bg-buncha-accent/80 transition-colors cursor-pointer"
+                onClick={() =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    show_in_tray: !prev.show_in_tray,
+                  }))
+                }
+                className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${
+                  settings.show_in_tray
+                    ? "bg-buncha-accent"
+                    : "bg-buncha-surface border border-buncha-border"
+                }`}
               >
-                Save Settings
+                <div
+                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                    settings.show_in_tray
+                      ? "right-0.5"
+                      : "left-0.5"
+                  }`}
+                />
               </button>
+            </div>
+
+            {/* Automatic Updates */}
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <h3 className="text-buncha-text font-medium mb-0.5">Automatic Updates</h3>
+                <p className="text-sm text-buncha-text-muted">Keep the app up to date automatically</p>
+              </div>
+              <button
+                onClick={() =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    automatic_updates: !prev.automatic_updates,
+                  }))
+                }
+                className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${
+                  settings.automatic_updates
+                    ? "bg-buncha-accent"
+                    : "bg-buncha-surface border border-buncha-border"
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                    settings.automatic_updates
+                      ? "right-0.5"
+                      : "left-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Theme */}
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <h3 className="text-buncha-text font-medium mb-0.5">Theme</h3>
+                <p className="text-sm text-buncha-text-muted">Choose your preferred theme</p>
+              </div>
+              <select
+                value={settings.theme}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    theme: e.target.value as "dark" | "light" | "system",
+                  }))
+                }
+                className="px-3 py-1.5 bg-buncha-surface rounded-lg border border-buncha-border text-sm text-buncha-text outline-none cursor-pointer hover:border-buncha-text-muted transition-colors"
+              >
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="system">System</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1650,23 +1871,11 @@ function App() {
       {showConverter && (
         <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
           {/* Tool Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
-            <div className="flex items-center">
-              <span className="text-xl mr-3">🔄</span>
-              <span className="text-buncha-text text-base font-medium">Omni Converter</span>
+          <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
+            <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
+              <Repeat2 className="w-4 h-4" />
+              <span>Omni Converter</span>
             </div>
-            <button
-              onClick={async () => {
-                await invoke("set_auto_hide", { enabled: true });
-                setShowConverter(false);
-                setConverterType(null);
-                setSelectedFile(null);
-                setTargetFormat(null);
-              }}
-              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
           <div className="p-4">
             {/* Type Selection View */}
@@ -1852,23 +2061,11 @@ function App() {
       {showPortKiller && (
         <div className="bg-buncha-bg border border-buncha-border rounded-buncha shadow-2xl" onMouseDown={handleDragStart}>
           {/* Tool Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-buncha-border cursor-default" data-drag-region>
-            <div className="flex items-center">
-              <span className="text-xl mr-3">🔌</span>
-              <span className="text-buncha-text text-base font-medium">Port Killer</span>
+          <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
+            <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
+              <Network className="w-4 h-4" />
+              <span>Port Killer</span>
             </div>
-            <button
-              onClick={async () => {
-                await invoke("set_auto_hide", { enabled: true });
-                setShowPortKiller(false);
-                setPortInput("");
-                setPortProcesses([]);
-                setScannedPort(null);
-              }}
-              className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
           <div className="p-4">
             {/* Port Input */}
@@ -1971,25 +2168,18 @@ function App() {
       {showTranslation && (
         <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={handleDragStart}>
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-buncha-border/50 bg-buncha-surface/30" data-drag-region>
-            <div className="flex items-center gap-3">
-              <Languages className="w-5 h-5 text-buncha-accent" />
-              <span className="text-buncha-text text-base font-medium">Quick Translation</span>
+
+          <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
+            <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
+              <Languages className="w-4 h-4" />
+              <span>Quick Translation</span>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setIsTranslationSettingsOpen(!isTranslationSettingsOpen)}
-                className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
-              >
-                <SettingsIcon className="w-4 h-4 text-buncha-text-muted hover:text-buncha-text transition-colors" />
-              </button>
-              <button
-                onClick={() => setShowTranslation(false)}
-                className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4 text-buncha-text-muted hover:text-buncha-text transition-colors" />
-              </button>
-            </div>
+            <button
+              onClick={() => setIsTranslationSettingsOpen(!isTranslationSettingsOpen)}
+              className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
+            >
+              <SettingsIcon className="w-4 h-4 text-buncha-text-muted hover:text-buncha-text transition-colors" />
+            </button>
           </div>
 
           {/* Settings Panel (conditionally shown) */}
