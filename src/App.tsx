@@ -838,6 +838,7 @@ function App() {
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const settingsInitialized = useRef(false);
+  const toolItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Converter state
   const [showConverter, setShowConverter] = useState(false);
@@ -1305,6 +1306,17 @@ function App() {
       }
     }
   }, [query]);
+
+  // Scroll selected tool into view when navigating with arrow keys
+  useEffect(() => {
+    const selectedElement = toolItemRefs.current[selectedIndex];
+    if (selectedElement) {
+      selectedElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      });
+    }
+  }, [selectedIndex]);
 
   // Resize window based on active view
   useEffect(() => {
@@ -1811,6 +1823,7 @@ function App() {
                   return (
                     <div
                       key={tool.id}
+                      ref={(el) => { toolItemRefs.current[index] = el; }}
                       onClick={() => executeTool(tool)}
                       className={`group px-5 py-4 transition-all cursor-pointer flex items-center gap-4 ${
                         index === selectedIndex
