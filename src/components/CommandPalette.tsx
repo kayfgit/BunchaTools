@@ -1,0 +1,202 @@
+import React from "react";
+import {
+  Search,
+  Loader2,
+  ArrowRight,
+} from "lucide-react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import type { Tool, QuickResult } from "../types";
+
+interface CommandPaletteProps {
+  query: string;
+  setQuery: (query: string) => void;
+  filteredTools: Tool[];
+  selectedIndex: number;
+  status: string | null;
+  setStatus: (status: string | null) => void;
+  quickResult: QuickResult | null;
+  currencyLoading: boolean;
+  onToolExecute: (tool: Tool) => Promise<void>;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  toolItemRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
+  onDragStart: (e: React.MouseEvent) => void;
+}
+
+export function CommandPalette({
+  query,
+  setQuery,
+  filteredTools,
+  selectedIndex,
+  status,
+  setStatus,
+  quickResult,
+  currencyLoading,
+  onToolExecute,
+  onKeyDown,
+  inputRef,
+  toolItemRefs,
+  onDragStart,
+}: CommandPaletteProps) {
+  return (
+    <div
+      className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
+      onMouseDown={onDragStart}
+    >
+      {/* Search Input */}
+      <div className="relative border-b border-buncha-border py-4" data-drag-region>
+        <div className="absolute left-5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+          <Search className="w-5 h-5 text-buncha-text-muted" />
+        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={status || "Search for tools..."}
+          className={`ml-15 w-145 py-1 bg-transparent text-lg outline-none ${
+            status
+              ? "text-buncha-accent placeholder-buncha-accent"
+              : "text-buncha-text placeholder-buncha-text-muted"
+          }`}
+          autoFocus
+        />
+      </div>
+
+      {/* Results List */}
+      <div className="max-h-[340px] overflow-y-auto scrollbar-hidden">
+        {/* Quick Result Display */}
+        {quickResult && (
+          <div className="py-2 border-b border-buncha-border">
+            <div className={`px-5 py-4 border-l-2 ${quickResult.isPreview ? 'bg-buncha-surface/30 border-buncha-text-muted' : 'bg-buncha-accent/5 border-buncha-accent'}`}>
+              <div className="flex items-center gap-4">
+                <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${quickResult.isPreview ? 'bg-buncha-surface/50' : 'bg-buncha-accent/10'}`}>
+                  <quickResult.icon className={`w-6 h-6 ${quickResult.isPreview ? 'text-buncha-text-muted' : 'text-buncha-accent'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-sm text-buncha-text-muted">{quickResult.query}</p>
+                    {quickResult.isPreview && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-buncha-surface rounded text-buncha-text-muted">
+                        Preview
+                      </span>
+                    )}
+                  </div>
+                  <h3 className={`text-2xl font-bold ${quickResult.isPreview ? 'text-buncha-text' : 'text-buncha-accent'}`}>{quickResult.result}</h3>
+                </div>
+                <button
+                  onClick={async () => {
+                    await writeText(quickResult.copyValue);
+                    setStatus("Copied!");
+                    setTimeout(() => setStatus(null), 1500);
+                  }}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${quickResult.isPreview ? 'bg-buncha-surface hover:bg-buncha-surface/80 text-buncha-text-muted' : 'bg-buncha-accent/10 hover:bg-buncha-accent/20 text-buncha-accent'}`}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Currency Loading State */}
+        {currencyLoading && !quickResult && (
+          <div className="py-2 border-b border-buncha-border">
+            <div className="px-5 py-4 bg-buncha-accent/5 border-l-2 border-buncha-accent">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-buncha-accent/10">
+                  <Loader2 className="w-6 h-6 text-buncha-accent animate-spin" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-buncha-text-muted mb-1">{query}</p>
+                  <h3 className="text-2xl font-bold text-buncha-accent">Converting...</h3>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {filteredTools.length > 0 ? (
+          <div className="py-2">
+            {filteredTools.map((tool, index) => {
+              const IconComponent = tool.icon;
+              return (
+                <div
+                  key={tool.id}
+                  ref={(el) => { toolItemRefs.current[index] = el; }}
+                  onClick={() => onToolExecute(tool)}
+                  className={`group px-5 py-4 transition-all cursor-pointer flex items-center gap-4 ${
+                    index === selectedIndex
+                      ? "bg-buncha-surface/50"
+                      : "hover:bg-buncha-surface/50"
+                  }`}
+                >
+                  <div className={`flex items-center justify-center w-12 h-12 rounded-xl transition-colors ${
+                    index === selectedIndex
+                      ? "bg-buncha-accent/20"
+                      : "bg-buncha-accent/10 group-hover:bg-buncha-accent/20"
+                  }`}>
+                    <IconComponent className="w-6 h-6 text-buncha-accent" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className={`font-semibold mb-0.5 transition-colors ${
+                      index === selectedIndex
+                        ? "text-buncha-accent"
+                        : "text-buncha-text group-hover:text-buncha-accent"
+                    }`}>
+                      {tool.name}
+                    </h3>
+                    <p className="text-sm text-buncha-text-muted line-clamp-1">
+                      {tool.description}
+                    </p>
+                  </div>
+                  <ArrowRight className={`w-5 h-5 text-buncha-text-muted transition-all ${
+                    index === selectedIndex
+                      ? "opacity-100 translate-x-1"
+                      : "opacity-0 group-hover:opacity-100 group-hover:translate-x-1"
+                  }`} />
+                </div>
+              );
+            })}
+          </div>
+        ) : !quickResult && !currencyLoading && (
+          <div className="py-16 px-5 text-center">
+            <div className="w-16 h-16 rounded-full bg-buncha-surface/50 flex items-center justify-center mx-auto mb-4">
+              <Search className="w-8 h-8 text-buncha-text-muted" />
+            </div>
+            <p className="text-buncha-text-muted mb-1">No tools found</p>
+            <p className="text-sm text-buncha-text-muted/70">Try searching for "converter" or "translate"</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-buncha-border px-5 py-3 bg-buncha-surface/30" data-drag-region>
+        <div className="flex items-center justify-between text-xs text-buncha-text-muted">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                <span className="font-medium">↑</span>
+              </div>
+              <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                <span className="font-medium">↓</span>
+              </div>
+              <span>to navigate</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+                <span className="font-medium">↵</span>
+              </div>
+              <span>to select</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="px-1.5 py-0.5 bg-buncha-surface rounded border border-buncha-border">
+              <span className="font-medium">esc</span>
+            </div>
+            <span>to close</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

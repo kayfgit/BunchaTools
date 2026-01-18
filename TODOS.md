@@ -9,7 +9,7 @@
 [] - Expand color details window to the right
 [] - Fix "Start at startup" on settings, doesn't work
 [] - Center "Settings" text header on settings window
-[] - Breakdown the App.tsx into components (should have done that a long time ago)
+[x] - Breakdown the App.tsx into components (Should have done that a long time ago)
 [] - Change "Copy" button to a green checkmark after copying on quick tools
 [] - Remove spellcheck from QR Code Generator
 [] - Make users be able to type on Quick Translate instead of just highlighting, add debounce to not spam the API
