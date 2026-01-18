@@ -31,7 +31,7 @@ BunchaTools puts all these utilities in one place, accessible instantly with a s
   <img width="1483" height="504" alt="image" src="https://github.com/user-attachments/assets/d637a607-528c-4057-b530-7f7b49b2eacb" />
 </div>
 
-## QR Code Generator
+### QR Code Generator
 
 <div align="center">
   <img width="797" height="566" alt="image" src="https://github.com/user-attachments/assets/0de6cf4a-32e5-4b75-b51f-e89490685f11" />
@@ -83,6 +83,27 @@ Translate text between 30+ languages. Simply enable text selection mode, highlig
 - Automatic language detection
 - Supports English, Japanese, Spanish, French, German, Chinese, Korean, Portuguese, Russian, Italian, Arabic, and many more
 - Works with any text on your screen
+
+### QR Code Generator
+Generate QR codes instantly for various use cases without relying on online generators.
+
+**Supported QR code types:**
+- **URL**: Website links and URLs
+- **WiFi**: Network credentials (SSID, password, encryption type)
+- **Email**: Pre-filled email addresses with optional subject lines
+- **Phone**: Phone numbers for quick dialing
+- **Text**: Plain text messages
+- **vCard**: Contact cards with name, phone, and email
+- **Location**: Geographic coordinates (latitude/longitude)
+- **Event**: Calendar events with title, date range, and location
+
+**Features:**
+- Real-time preview as you type
+- Custom foreground and background colors
+- Copy QR code image to clipboard
+- Export to PNG, SVG, or PDF formats
+
+All QR codes are generated locally on your machine.
 
 # Installation
 
