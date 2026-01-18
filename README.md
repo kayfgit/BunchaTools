@@ -1,22 +1,7 @@
-# Placeholder for app photo :)
-
-An unbelievably lightweight, keyboard-activated launcher packed with a **Bunch of** developer and creative tools.
-
----
-
-# Quick Translation
-
-Placeholder for gifs showcasing the tool
-
-# Local Port Killer 
-
-Placeholder for gifs showcasing the tool
-
-# Omni Converter 
-
-Placeholder for gifs showcasing the tool
-
----
+<div align="center">
+  <img width="1225" height="397" alt="banner" src="https://github.com/user-attachments/assets/0bfdd1d6-6902-4f4f-92c9-3456fa9565b3" />
+      An unbelievably lightweight, keyboard-activated launcher packed with a Bunchatools™.
+</div>
 
 # About
 
@@ -26,17 +11,37 @@ Need to convert a video file? You used to have to visit some ad-ridden converter
 
 BunchaTools puts all these utilities in one place, accessible instantly with a single keyboard shortcut.
 
-**Note: This project is in very early development and will receive constant updates. Expect new tools, improvements, and changes frequently.**
+# Showcase
 
----
+### Command Palette
+
+<div align="center">
+  <img width="674" height="468" alt="image" src="https://github.com/user-attachments/assets/6a58eca6-f038-496a-bf6d-6d7957da8bb9" />
+</div>
+
+### Local Port Killer 
+
+<div align="center">
+  <img width="680" height="402" alt="image" src="https://github.com/user-attachments/assets/df35fbc9-f4a7-4793-a587-b40bf7a12136" />
+</div>
+
+### Quick Translation
+
+<div align="center">
+  <img width="1483" height="504" alt="image" src="https://github.com/user-attachments/assets/d637a607-528c-4057-b530-7f7b49b2eacb" />
+</div>
+
+## QR Code Generator
+
+<div align="center">
+  <img width="797" height="566" alt="image" src="https://github.com/user-attachments/assets/0de6cf4a-32e5-4b75-b51f-e89490685f11" />
+</div>
 
 # Features
 
 ### Quick Access
 - Global hotkey activation (default: `Alt+Q`)
-- System tray integration
 - Auto-hide when clicking away
-- Remembers window position
 - Instant search and filtering
 
 ### Built-in Calculator
@@ -52,7 +57,7 @@ Convert between currencies in real-time using natural queries.
 - Live exchange rates from Frankfurter API
 
 ### Color Picker
-Pick any color from anywhere on your screen. Click to capture and automatically copy the hex value to your clipboard.
+Pick any color from anywhere on your screen. Click to capture and choose from all of the relevant color formats for professionals.
 
 ### Omni Converter
 Convert media files locally without uploading to sketchy websites or dealing with watermarks.
@@ -79,8 +84,6 @@ Translate text between 30+ languages. Simply enable text selection mode, highlig
 - Supports English, Japanese, Spanish, French, German, Chinese, Korean, Portuguese, Russian, Italian, Arabic, and many more
 - Works with any text on your screen
 
----
-
 # Installation
 
 ### Download
@@ -102,8 +105,6 @@ npm run tauri dev
 # Build for production
 npm run tauri build
 ```
-
----
 
 # Platform Support
 
