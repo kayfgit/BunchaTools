@@ -2,7 +2,10 @@
 
 use super::PortProcess;
 use std::collections::HashSet;
+use std::os::windows::process::CommandExt;
 use std::process::Command;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use windows::Win32::{
     Foundation::POINT,
@@ -226,6 +229,7 @@ pub async fn start_text_selection_impl(window: tauri::Window) -> Result<(), Stri
 pub async fn scan_port_impl(port: u16) -> Result<Vec<PortProcess>, String> {
     let output = Command::new("netstat")
         .args(["-ano"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -295,6 +299,7 @@ pub async fn scan_port_impl(port: u16) -> Result<Vec<PortProcess>, String> {
 pub fn get_process_name_impl(pid: u32) -> Option<String> {
     let output = Command::new("tasklist")
         .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
 
@@ -314,6 +319,7 @@ pub fn get_process_name_impl(pid: u32) -> Option<String> {
 pub async fn kill_port_process_impl(pid: u32) -> Result<(), String> {
     let output = Command::new("taskkill")
         .args(["/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?;
 

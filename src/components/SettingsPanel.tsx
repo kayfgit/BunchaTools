@@ -1,14 +1,10 @@
 import React from "react";
-import {
-  X,
-  Settings as SettingsIcon,
-} from "lucide-react";
+import { Settings as SettingsIcon } from "lucide-react";
 import type { Settings } from "../types";
 
 interface SettingsPanelProps {
   settings: Settings;
   setSettings: React.Dispatch<React.SetStateAction<Settings>>;
-  onClose: () => void;
   isRecordingHotkey: boolean;
   setIsRecordingHotkey: (recording: boolean) => void;
   hotkeyInputRef: React.RefObject<HTMLDivElement | null>;
@@ -20,7 +16,6 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   settings,
   setSettings,
-  onClose,
   isRecordingHotkey,
   setIsRecordingHotkey,
   hotkeyInputRef,
@@ -31,17 +26,11 @@ export function SettingsPanel({
   return (
     <div className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden" onMouseDown={onDragStart}>
       {/* Header */}
-      <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-between" data-drag-region>
+      <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
         <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
           <SettingsIcon className="w-4 h-4" />
           <span>Settings</span>
         </div>
-        <button
-          onClick={onClose}
-          className="text-buncha-text-muted hover:text-buncha-text cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
       </div>
       <div className="p-4 space-y-1">
         {/* Keyboard Shortcut */}

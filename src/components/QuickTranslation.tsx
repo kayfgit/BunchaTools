@@ -4,7 +4,6 @@ import {
   Settings as SettingsIcon,
   Volume2,
   Copy,
-  ExternalLink,
   Loader2,
   ArrowDown,
 } from "lucide-react";

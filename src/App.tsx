@@ -1094,7 +1094,6 @@ function App() {
           filteredTools={filteredTools}
           selectedIndex={selectedIndex}
           status={status}
-          setStatus={setStatus}
           quickResult={quickResult}
           currencyLoading={currencyLoading}
           onToolExecute={executeTool}
@@ -1110,7 +1109,6 @@ function App() {
         <SettingsPanel
           settings={settings}
           setSettings={setSettings}
-          onClose={() => setShowSettings(false)}
           isRecordingHotkey={isRecordingHotkey}
           setIsRecordingHotkey={setIsRecordingHotkey}
           hotkeyInputRef={hotkeyInputRef}

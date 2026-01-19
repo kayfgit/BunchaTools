@@ -14,7 +14,6 @@ interface CommandPaletteProps {
   filteredTools: Tool[];
   selectedIndex: number;
   status: string | null;
-  setStatus: (status: string | null) => void;
   quickResult: QuickResult | null;
   currencyLoading: boolean;
   onToolExecute: (tool: Tool) => Promise<void>;
@@ -30,7 +29,6 @@ export function CommandPalette({
   filteredTools,
   selectedIndex,
   status,
-  setStatus,
   quickResult,
   currencyLoading,
   onToolExecute,
