@@ -14,6 +14,7 @@ import {
   Calculator,
   Ruler,
   QrCode,
+  Braces,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 
@@ -55,6 +56,7 @@ import {
   QuickTranslation,
   ColorPickerPanel,
   QRGenerator,
+  RegexTester,
 } from "./components";
 
 function App() {
@@ -127,6 +129,15 @@ function App() {
   const [qrImageDataUrl, setQRImageDataUrl] = useState<string>("");
   const [qrCopied, setQRCopied] = useState(false);
   const [selectedExportFormat, setSelectedExportFormat] = useState<"PNG" | "SVG" | "PDF">("PNG");
+
+  // Regex Tester state
+  const [showRegexTester, setShowRegexTester] = useState(false);
+  const [regexPattern, setRegexPattern] = useState("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
+  const [regexTestText, setRegexTestText] = useState("Contact us at support@example.com or sales@company.org for assistance.");
+  const [regexReplacement, setRegexReplacement] = useState("[EMAIL REDACTED]");
+  const [regexFlags, setRegexFlags] = useState({ g: true, i: true, m: false, s: false });
+  const [regexActiveTab, setRegexActiveTab] = useState<"matches" | "groups" | "replace">("matches");
+  const [regexCopiedItem, setRegexCopiedItem] = useState<string | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -259,6 +270,24 @@ function App() {
       },
     },
     {
+      id: "regex-tester",
+      name: "Regex Tester",
+      description: "Test and debug regular expressions instantly",
+      icon: Braces,
+      keywords: ["regex", "regexp", "regular", "expression", "pattern", "match", "replace", "test"],
+      action: async () => {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowRegexTester(true);
+        setRegexPattern("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
+        setRegexTestText("Contact us at support@example.com or sales@company.org for assistance.");
+        setRegexReplacement("[EMAIL REDACTED]");
+        setRegexFlags({ g: true, i: true, m: false, s: false });
+        setRegexActiveTab("matches");
+        setRegexCopiedItem(null);
+        setQuery("");
+      },
+    },
+    {
       id: "settings",
       name: "Settings",
       description: "Configure BunchaTools preferences",
@@ -377,6 +406,13 @@ function App() {
       setShowQRCustomization(false);
       setQRImageDataUrl("");
       setQRCopied(false);
+      setShowRegexTester(false);
+      setRegexPattern("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
+      setRegexTestText("Contact us at support@example.com or sales@company.org for assistance.");
+      setRegexReplacement("[EMAIL REDACTED]");
+      setRegexFlags({ g: true, i: true, m: false, s: false });
+      setRegexActiveTab("matches");
+      setRegexCopiedItem(null);
       inputRef.current?.focus();
     });
 
@@ -577,12 +613,15 @@ function App() {
       } else if (showQRGenerator) {
         height = showQRCustomization ? 800 : 600;
         width = showQRCustomization ? 1000 : 800;
+      } else if (showRegexTester) {
+        height = 590;
+        width = 1000;
       }
 
       await appWindow.setSize(new LogicalSize(width, height));
     };
     resizeWindow();
-  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker, showQRGenerator, showQRCustomization]);
+  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -612,11 +651,13 @@ function App() {
         setShowSettings(false);
       } else if (showQRGenerator) {
         setShowQRGenerator(false);
+      } else if (showRegexTester) {
+        setShowRegexTester(false);
       } else {
         invoke("hide_window");
         setQuery("");
       }
-    } else if (!showSettings && !showConverter && !showPortKiller && !showTranslation && !showQRGenerator) {
+    } else if (!showSettings && !showConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -839,6 +880,23 @@ function App() {
     };
   }, [showPortKiller]);
 
+  // Regex Tester blur handler (prevents flickering on reopen)
+  useEffect(() => {
+    if (!showRegexTester) return;
+
+    const handleBlur = () => {
+      if (!isDraggingRef.current) {
+        setShowRegexTester(false);
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showRegexTester]);
+
   // Port killer functions
   const handleScanPort = async (port: number) => {
     setIsScanning(true);
@@ -963,9 +1021,9 @@ function App() {
   };
 
   return (
-    <div className="p-2 select-none">
+    <div className="p-2 select-none" spellCheck={false}>
       {/* Command Palette - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && (
+      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
         <CommandPalette
           query={query}
           setQuery={setQuery}
@@ -1074,6 +1132,25 @@ function App() {
           setQRCopied={setQRCopied}
           selectedExportFormat={selectedExportFormat}
           setSelectedExportFormat={setSelectedExportFormat}
+          onDragStart={handleDragStart}
+        />
+      )}
+
+      {/* Regex Tester Panel */}
+      {showRegexTester && (
+        <RegexTester
+          pattern={regexPattern}
+          setPattern={setRegexPattern}
+          testText={regexTestText}
+          setTestText={setRegexTestText}
+          replacement={regexReplacement}
+          setReplacement={setRegexReplacement}
+          flags={regexFlags}
+          setFlags={setRegexFlags}
+          activeTab={regexActiveTab}
+          setActiveTab={setRegexActiveTab}
+          copiedItem={regexCopiedItem}
+          setCopiedItem={setRegexCopiedItem}
           onDragStart={handleDragStart}
         />
       )}
