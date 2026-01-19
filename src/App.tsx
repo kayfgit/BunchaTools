@@ -15,6 +15,7 @@ import {
   Ruler,
   QrCode,
   Braces,
+  Palette,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 
@@ -45,6 +46,8 @@ import {
   parseCurrencyQuery,
   parsePartialCurrencyQuery,
   evaluateExpression,
+  parseColorQuery,
+  rgbToHex,
 } from "./utils";
 
 // Import components
@@ -450,6 +453,22 @@ function App() {
           result: calcResult,
           icon: Calculator,
           copyValue: calcResult.replace(/\./g, "").replace(/,/g, "."), // Convert from de-DE format to number
+        });
+        setCurrencyResult(null);
+        return;
+      }
+
+      // Check for color conversion
+      const colorResult = parseColorQuery(query);
+      if (colorResult) {
+        const hexColor = rgbToHex(colorResult.rgb.r, colorResult.rgb.g, colorResult.rgb.b);
+        setQuickResult({
+          type: "color",
+          query: colorResult.displayQuery,
+          result: colorResult.result,
+          icon: Palette,
+          copyValue: colorResult.result,
+          colorPreview: hexColor,
         });
         setCurrencyResult(null);
         return;

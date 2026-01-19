@@ -79,9 +79,17 @@ export function CommandPalette({
           <div className="py-2 border-b border-buncha-border">
             <div className={`px-5 py-4 border-l-2 ${quickResult.isPreview ? 'bg-buncha-surface/30 border-buncha-text-muted' : 'bg-buncha-accent/5 border-buncha-accent'}`}>
               <div className="flex items-center gap-4">
-                <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${quickResult.isPreview ? 'bg-buncha-surface/50' : 'bg-buncha-accent/10'}`}>
-                  <quickResult.icon className={`w-6 h-6 ${quickResult.isPreview ? 'text-buncha-text-muted' : 'text-buncha-accent'}`} />
-                </div>
+                {/* Color swatch or icon */}
+                {quickResult.type === 'color' && quickResult.colorPreview ? (
+                  <div
+                    className="w-12 h-12 rounded-xl border border-buncha-border"
+                    style={{ backgroundColor: quickResult.colorPreview }}
+                  />
+                ) : (
+                  <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${quickResult.isPreview ? 'bg-buncha-surface/50' : 'bg-buncha-accent/10'}`}>
+                    <quickResult.icon className={`w-6 h-6 ${quickResult.isPreview ? 'text-buncha-text-muted' : 'text-buncha-accent'}`} />
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <p className="text-sm text-buncha-text-muted">{quickResult.query}</p>

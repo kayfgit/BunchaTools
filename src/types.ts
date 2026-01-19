@@ -92,12 +92,13 @@ export interface UnitConversionResult {
 }
 
 export interface QuickResult {
-  type: "calculator" | "unit" | "currency";
+  type: "calculator" | "unit" | "currency" | "color";
   query: string;
   result: string;
   icon: LucideIcon;
   copyValue: string;
   isPreview?: boolean;
+  colorPreview?: string;
 }
 
 export interface PartialUnitSuggestion {

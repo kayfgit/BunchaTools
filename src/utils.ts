@@ -193,6 +193,327 @@ export function convertHexToFormats(hex: string): ColorFormats {
   };
 }
 
+// ============ Reverse Color Conversion Utilities ============
+
+export function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+
+  if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+  else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+  else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+  else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+  else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+  else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
+}
+
+export function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+  s /= 100;
+  v /= 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+
+  if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+  else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+  else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+  else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+  else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+  else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
+}
+
+export function cmykToRgb(c: number, m: number, y: number, k: number): { r: number; g: number; b: number } {
+  c /= 100;
+  m /= 100;
+  y /= 100;
+  k /= 100;
+  return {
+    r: Math.round(255 * (1 - c) * (1 - k)),
+    g: Math.round(255 * (1 - m) * (1 - k)),
+    b: Math.round(255 * (1 - y) * (1 - k)),
+  };
+}
+
+export function labToRgb(l: number, a: number, b: number): { r: number; g: number; b: number } {
+  let y = (l + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+
+  const y3 = Math.pow(y, 3);
+  const x3 = Math.pow(x, 3);
+  const z3 = Math.pow(z, 3);
+
+  y = y3 > 0.008856 ? y3 : (y - 16 / 116) / 7.787;
+  x = x3 > 0.008856 ? x3 : (x - 16 / 116) / 7.787;
+  z = z3 > 0.008856 ? z3 : (z - 16 / 116) / 7.787;
+
+  x *= 95.047;
+  y *= 100.0;
+  z *= 108.883;
+
+  x /= 100;
+  y /= 100;
+  z /= 100;
+
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let bb = x * 0.0557 + y * -0.204 + z * 1.057;
+
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+  bb = bb > 0.0031308 ? 1.055 * Math.pow(bb, 1 / 2.4) - 0.055 : 12.92 * bb;
+
+  return {
+    r: Math.round(Math.max(0, Math.min(255, r * 255))),
+    g: Math.round(Math.max(0, Math.min(255, g * 255))),
+    b: Math.round(Math.max(0, Math.min(255, bb * 255))),
+  };
+}
+
+export function xyzToRgb(x: number, y: number, z: number): { r: number; g: number; b: number } {
+  x /= 100;
+  y /= 100;
+  z /= 100;
+
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let b = x * 0.0557 + y * -0.204 + z * 1.057;
+
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+  b = b > 0.0031308 ? 1.055 * Math.pow(b, 1 / 2.4) - 0.055 : 12.92 * b;
+
+  return {
+    r: Math.round(Math.max(0, Math.min(255, r * 255))),
+    g: Math.round(Math.max(0, Math.min(255, g * 255))),
+    b: Math.round(Math.max(0, Math.min(255, b * 255))),
+  };
+}
+
+export function oklchToRgb(l: number, c: number, h: number): { r: number; g: number; b: number } {
+  const hRad = (h * Math.PI) / 180;
+  const a = c * Math.cos(hRad);
+  const b = c * Math.sin(hRad);
+
+  const L = l / 100;
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+
+  const l__ = l_ * l_ * l_;
+  const m__ = m_ * m_ * m_;
+  const s__ = s_ * s_ * s_;
+
+  let r = 4.0767416621 * l__ - 3.3077115913 * m__ + 0.2309699292 * s__;
+  let g = -1.2684380046 * l__ + 2.6097574011 * m__ - 0.3413193965 * s__;
+  let bb = -0.0041960863 * l__ - 0.7034186147 * m__ + 1.707614701 * s__;
+
+  const toSrgb = (c: number) => {
+    return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  };
+
+  r = toSrgb(r);
+  g = toSrgb(g);
+  bb = toSrgb(bb);
+
+  return {
+    r: Math.round(Math.max(0, Math.min(255, r * 255))),
+    g: Math.round(Math.max(0, Math.min(255, g * 255))),
+    b: Math.round(Math.max(0, Math.min(255, bb * 255))),
+  };
+}
+
+export function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (n: number) => {
+    const hex = Math.max(0, Math.min(255, Math.round(n))).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+// ============ Color Query Parsing ============
+
+export type ColorFormat = 'hex' | 'rgb' | 'hsl' | 'hsv' | 'oklch' | 'cmyk' | 'lab' | 'xyz';
+
+export interface ColorConversionResult {
+  fromFormat: ColorFormat;
+  toFormat: ColorFormat;
+  rgb: { r: number; g: number; b: number };
+  result: string;
+  displayQuery: string;
+}
+
+export function parseAnyColor(input: string): { format: ColorFormat; rgb: { r: number; g: number; b: number } } | null {
+  const trimmed = input.trim().toLowerCase();
+
+  const hexMatch = trimmed.match(/^#?([a-f0-9]{3}|[a-f0-9]{6})$/i);
+  if (hexMatch) {
+    let hex = hexMatch[1];
+    if (hex.length === 3) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    return { format: 'hex', rgb: hexToRgb('#' + hex) };
+  }
+
+  const rgbMatch = trimmed.match(/^rgba?\s*\(\s*(\d+)\s*[,\s]\s*(\d+)\s*[,\s]\s*(\d+)\s*(?:[,\s]\s*[\d.]+)?\s*\)$/);
+  if (rgbMatch) {
+    return {
+      format: 'rgb',
+      rgb: {
+        r: Math.min(255, parseInt(rgbMatch[1])),
+        g: Math.min(255, parseInt(rgbMatch[2])),
+        b: Math.min(255, parseInt(rgbMatch[3])),
+      },
+    };
+  }
+
+  const hslMatch = trimmed.match(/^hsla?\s*\(\s*([\d.]+)\s*[,\s]\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*(?:[,\s]\s*[\d.]+)?\s*\)$/);
+  if (hslMatch) {
+    const h = parseFloat(hslMatch[1]) % 360;
+    const s = Math.min(100, parseFloat(hslMatch[2]));
+    const l = Math.min(100, parseFloat(hslMatch[3]));
+    return { format: 'hsl', rgb: hslToRgb(h, s, l) };
+  }
+
+  const hsvMatch = trimmed.match(/^hs[vb]\s*\(\s*([\d.]+)\s*[,\s]\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*\)$/);
+  if (hsvMatch) {
+    const h = parseFloat(hsvMatch[1]) % 360;
+    const s = Math.min(100, parseFloat(hsvMatch[2]));
+    const v = Math.min(100, parseFloat(hsvMatch[3]));
+    return { format: 'hsv', rgb: hsvToRgb(h, s, v) };
+  }
+
+  const oklchMatch = trimmed.match(/^oklch\s*\(\s*([\d.]+)%?\s+([.\d]+)\s+([\d.]+)\s*\)$/);
+  if (oklchMatch) {
+    const l = parseFloat(oklchMatch[1]);
+    const c = parseFloat(oklchMatch[2]);
+    const h = parseFloat(oklchMatch[3]) % 360;
+    return { format: 'oklch', rgb: oklchToRgb(l, c, h) };
+  }
+
+  const cmykMatch = trimmed.match(/^cmyk\s*\(\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*\)$/);
+  if (cmykMatch) {
+    const c = Math.min(100, parseFloat(cmykMatch[1]));
+    const m = Math.min(100, parseFloat(cmykMatch[2]));
+    const y = Math.min(100, parseFloat(cmykMatch[3]));
+    const k = Math.min(100, parseFloat(cmykMatch[4]));
+    return { format: 'cmyk', rgb: cmykToRgb(c, m, y, k) };
+  }
+
+  const labMatch = trimmed.match(/^lab\s*\(\s*([\d.]+)%?\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\)$/);
+  if (labMatch) {
+    const l = parseFloat(labMatch[1]);
+    const a = parseFloat(labMatch[2]);
+    const b = parseFloat(labMatch[3]);
+    return { format: 'lab', rgb: labToRgb(l, a, b) };
+  }
+
+  const xyzMatch = trimmed.match(/^xyz\s*\(\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*[,\s]\s*([\d.]+)%?\s*\)$/);
+  if (xyzMatch) {
+    const x = parseFloat(xyzMatch[1]);
+    const y = parseFloat(xyzMatch[2]);
+    const z = parseFloat(xyzMatch[3]);
+    return { format: 'xyz', rgb: xyzToRgb(x, y, z) };
+  }
+
+  return null;
+}
+
+export function formatRgbTo(rgb: { r: number; g: number; b: number }, format: ColorFormat): string {
+  switch (format) {
+    case 'hex':
+      return rgbToHex(rgb.r, rgb.g, rgb.b);
+    case 'rgb':
+      return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+    case 'hsl': {
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      return `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`;
+    }
+    case 'hsv': {
+      const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+      return `hsv(${hsv.h}, ${hsv.s}%, ${hsv.v}%)`;
+    }
+    case 'oklch': {
+      const oklch = rgbToOklch(rgb.r, rgb.g, rgb.b);
+      return `oklch(${oklch.l}% ${oklch.c} ${oklch.h})`;
+    }
+    case 'cmyk': {
+      const cmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b);
+      return `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`;
+    }
+    case 'lab': {
+      const lab = rgbToLab(rgb.r, rgb.g, rgb.b);
+      return `lab(${lab.l}% ${lab.a} ${lab.b})`;
+    }
+    case 'xyz': {
+      const xyz = rgbToXyz(rgb.r, rgb.g, rgb.b);
+      return `xyz(${xyz.x}%, ${xyz.y}%, ${xyz.z}%)`;
+    }
+    default:
+      return rgbToHex(rgb.r, rgb.g, rgb.b);
+  }
+}
+
+const COLOR_FORMAT_ALIASES: Record<string, ColorFormat> = {
+  hex: 'hex',
+  hexadecimal: 'hex',
+  rgb: 'rgb',
+  rgba: 'rgb',
+  hsl: 'hsl',
+  hsla: 'hsl',
+  hsv: 'hsv',
+  hsb: 'hsv',
+  oklch: 'oklch',
+  cmyk: 'cmyk',
+  lab: 'lab',
+  xyz: 'xyz',
+};
+
+export function parseColorQuery(query: string): ColorConversionResult | null {
+  const trimmed = query.trim().toLowerCase();
+
+  const match = trimmed.match(/^(.+?)\s+(?:to|in)\s+(\w+)$/);
+  if (!match) return null;
+
+  const colorPart = match[1].trim();
+  const targetFormatInput = match[2].trim();
+
+  const toFormat = COLOR_FORMAT_ALIASES[targetFormatInput];
+  if (!toFormat) return null;
+
+  const parsed = parseAnyColor(colorPart);
+  if (!parsed) return null;
+
+  if (parsed.format === toFormat) return null;
+
+  const result = formatRgbTo(parsed.rgb, toFormat);
+
+  return {
+    fromFormat: parsed.format,
+    toFormat,
+    rgb: parsed.rgb,
+    result,
+    displayQuery: `${colorPart} to ${toFormat}`,
+  };
+}
+
 // ============ QR Code Content Generator ============
 
 export function generateQRContent(type: QRCodeType, data: QRCodeData): string {
