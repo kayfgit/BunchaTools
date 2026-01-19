@@ -13,6 +13,7 @@ import { LANGUAGE_NAMES } from "../constants";
 
 interface QuickTranslationProps {
   translationInput: string;
+  setTranslationInput: (text: string) => void;
   translationOutput: string;
   detectedLanguage: string;
   targetLanguage: string;
@@ -26,6 +27,7 @@ interface QuickTranslationProps {
 
 export function QuickTranslation({
   translationInput,
+  setTranslationInput,
   translationOutput,
   detectedLanguage,
   targetLanguage,
@@ -82,8 +84,8 @@ export function QuickTranslation({
       <div className="p-6">
         {/* Source Text */}
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-buncha-accent uppercase tracking-wider">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-buncha-accent uppercase tracking-wider">
               {detectedLanguage}
             </span>
             <div className="flex items-center gap-1">
@@ -98,13 +100,16 @@ export function QuickTranslation({
               </button>
             </div>
           </div>
-          <p className="text-lg leading-relaxed text-buncha-text/90 select-text min-h-[28px]">
-            {translationInput || <span className="text-buncha-text-muted italic">No text selected</span>}
-          </p>
+          <textarea
+            value={translationInput}
+            onChange={(e) => setTranslationInput(e.target.value)}
+            placeholder="Type or paste text to translate..."
+            className="w-full bg-transparent text-lg text-buncha-text/90 resize-none min-h-[20px] focus:outline-none placeholder:text-buncha-text-muted placeholder:italic"
+          />
         </div>
 
         {/* Divider */}
-        <div className="relative py-3 mb-6">
+        <div className="relative py-1 mb-6">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-buncha-border/50" />
           </div>
@@ -121,8 +126,8 @@ export function QuickTranslation({
 
         {/* Translated Text */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-buncha-accent uppercase tracking-wider">{LANGUAGE_NAMES[targetLanguage] || targetLanguage}</span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-buncha-accent uppercase tracking-wider">{LANGUAGE_NAMES[targetLanguage] || targetLanguage}</span>
             <div className="flex items-center gap-1">
               <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
                 <Volume2 className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
@@ -133,12 +138,9 @@ export function QuickTranslation({
               >
                 <Copy className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
               </button>
-              <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
-                <ExternalLink className="w-4 h-4 text-buncha-text-muted group-hover:text-buncha-text transition-colors" />
-              </button>
             </div>
           </div>
-          <p className="text-lg leading-relaxed font-medium text-buncha-text select-text min-h-[28px]">
+          <p className="mb-4 text-lg font-medium text-buncha-text select-text min-h-[28px]">
             {translationError ? (
               <span className="text-red-400">{translationError}</span>
             ) : isTranslating ? (

@@ -12,7 +12,7 @@
 [x] - Breakdown the App.tsx into components (Should have done that a long time ago)
 [] - Change "Copy" button to a green checkmark after copying on quick tools
 [x] - Remove spellcheck from the app except in Quick Translation 
-[] - Make users be able to type on Quick Translate instead of just highlighting, add debounce to not spam the API
+[x] - Make users be able to type on Quick Translate instead of just highlighting, add debounce to not spam the API
 [x] - Add Regex Tester tool
 [] - Polish Regex Tester tool
 [x] - Add quick color converter in the command palette (oklch(0.6 0 0) to hex)

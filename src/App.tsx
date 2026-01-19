@@ -364,6 +364,32 @@ function App() {
     return () => clearTimeout(timeoutId);
   }, [showQRGenerator, qrType, qrData, qrForegroundColor, qrBackgroundColor]);
 
+  // Debounced translation when input changes (for manual typing)
+  useEffect(() => {
+    if (!showTranslation || !translationInput.trim()) {
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsTranslating(true);
+      setTranslationError(null);
+      try {
+        const result = await invoke<TranslationResult>("translate_text", {
+          text: translationInput,
+          targetLang: targetLanguage,
+        });
+        setTranslationOutput(result.translated_text);
+        setDetectedLanguage(result.detected_language);
+      } catch (err) {
+        setTranslationError(String(err));
+      } finally {
+        setIsTranslating(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [translationInput, targetLanguage, showTranslation]);
+
   // Listen for conversion progress events
   useEffect(() => {
     const unlisten = listen<number>("conversion-progress", (event) => {
@@ -623,7 +649,7 @@ function App() {
       } else if (showPortKiller) {
         height = 450;
       } else if (showTranslation) {
-        height = isTranslationSettingsOpen ? 480 : 400;
+        height = isTranslationSettingsOpen ? 530 : 450;
       } else if (showSettings) {
         height = 460;
       } else if (showColorPicker) {
@@ -1130,6 +1156,7 @@ function App() {
       {showTranslation && (
         <QuickTranslation
           translationInput={translationInput}
+          setTranslationInput={setTranslationInput}
           translationOutput={translationOutput}
           detectedLanguage={detectedLanguage}
           targetLanguage={targetLanguage}
