@@ -897,6 +897,25 @@ function App() {
     };
   }, [showRegexTester]);
 
+  // Command palette blur handler (hides window on blur)
+  useEffect(() => {
+    // Only handle blur when command palette is visible (no other panel is open)
+    const isCommandPaletteVisible = !showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester;
+    if (!isCommandPaletteVisible) return;
+
+    const handleBlur = async () => {
+      if (!isDraggingRef.current) {
+        await invoke("hide_window");
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester]);
+
   // Port killer functions
   const handleScanPort = async (port: number) => {
     setIsScanning(true);

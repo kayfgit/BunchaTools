@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Loader2,
   ArrowRight,
+  Check,
 } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Tool, QuickResult } from "../types";
@@ -38,6 +39,13 @@ export function CommandPalette({
   toolItemRefs,
   onDragStart,
 }: CommandPaletteProps) {
+  const [copied, setCopied] = useState(false);
+
+  // Reset copied state when quickResult changes
+  useEffect(() => {
+    setCopied(false);
+  }, [quickResult?.copyValue]);
+
   return (
     <div
       className="bg-buncha-bg border border-buncha-border rounded-2xl shadow-2xl overflow-hidden"
@@ -88,12 +96,18 @@ export function CommandPalette({
                 <button
                   onClick={async () => {
                     await writeText(quickResult.copyValue);
-                    setStatus("Copied!");
-                    setTimeout(() => setStatus(null), 1500);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
                   }}
-                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${quickResult.isPreview ? 'bg-buncha-surface hover:bg-buncha-surface/80 text-buncha-text-muted' : 'bg-buncha-accent/10 hover:bg-buncha-accent/20 text-buncha-accent'}`}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer ${
+                    copied
+                      ? 'bg-green-500/20 text-green-500'
+                      : quickResult.isPreview
+                        ? 'bg-buncha-surface hover:bg-buncha-surface/80 text-buncha-text-muted'
+                        : 'bg-buncha-accent/10 hover:bg-buncha-accent/20 text-buncha-accent'
+                  }`}
                 >
-                  Copy
+                  {copied ? <Check className="w-4 h-4" /> : 'Copy'}
                 </button>
               </div>
             </div>

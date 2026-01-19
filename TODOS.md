@@ -16,4 +16,4 @@
 [x] - Add Regex Tester tool
 [] - Polish Regex Tester tool
 [] - Add quick color converter in the command palette (oklch(0.6 0 0) to hex)
-[] - Add compatibility to linux
+[?] - Add compatibility to linux
