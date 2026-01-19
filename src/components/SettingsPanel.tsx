@@ -108,7 +108,7 @@ export function SettingsPanel({
         <div className="flex items-center justify-between py-3">
           <div>
             <h3 className="text-buncha-text font-medium mb-0.5">Show in System Tray</h3>
-            <p className="text-sm text-buncha-text-muted">Display icon in Windows notification area</p>
+            <p className="text-sm text-buncha-text-muted">Display icon in system tray</p>
           </div>
           <button
             onClick={() =>
