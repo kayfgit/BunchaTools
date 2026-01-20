@@ -83,7 +83,7 @@ export function ColorPickerPanel({
             ].map((format) => (
               <div
                 key={format.label}
-                className="group/format bg-buncha-surface/30 hover:bg-buncha-surface/50 border border-buncha-border hover:border-buncha-accent/50 rounded-lg py-2 pl-3 pr-6 transition-all duration-200 cursor-pointer"
+                className="group/format bg-buncha-surface/30 hover:bg-buncha-surface/50 border border-buncha-border hover:border-buncha-accent/50 rounded-lg py-2 pl-3 transition-all duration-200 cursor-pointer"
                 onClick={async () => {
                   await writeText(format.value);
                   setCopiedFormat(format.label);

@@ -143,9 +143,9 @@ function App() {
 
   // Regex Tester state
   const [showRegexTester, setShowRegexTester] = useState(false);
-  const [regexPattern, setRegexPattern] = useState("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
-  const [regexTestText, setRegexTestText] = useState("Contact us at support@example.com or sales@company.org for assistance.");
-  const [regexReplacement, setRegexReplacement] = useState("[EMAIL REDACTED]");
+  const [regexPattern, setRegexPattern] = useState("");
+  const [regexTestText, setRegexTestText] = useState("");
+  const [regexReplacement, setRegexReplacement] = useState("");
   const [regexFlags, setRegexFlags] = useState({ g: true, i: true, m: false, s: false });
   const [regexActiveTab, setRegexActiveTab] = useState<"matches" | "groups" | "replace">("matches");
   const [regexCopiedItem, setRegexCopiedItem] = useState<string | null>(null);
@@ -299,12 +299,6 @@ function App() {
       action: async () => {
         await invoke("set_auto_hide", { enabled: true });
         setShowRegexTester(true);
-        setRegexPattern("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
-        setRegexTestText("Contact us at support@example.com or sales@company.org for assistance.");
-        setRegexReplacement("[EMAIL REDACTED]");
-        setRegexFlags({ g: true, i: true, m: false, s: false });
-        setRegexActiveTab("matches");
-        setRegexCopiedItem(null);
         setQuery("");
       },
     },
@@ -464,12 +458,6 @@ function App() {
       setQRImageDataUrl("");
       setQRCopied(false);
       setShowRegexTester(false);
-      setRegexPattern("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b");
-      setRegexTestText("Contact us at support@example.com or sales@company.org for assistance.");
-      setRegexReplacement("[EMAIL REDACTED]");
-      setRegexFlags({ g: true, i: true, m: false, s: false });
-      setRegexActiveTab("matches");
-      setRegexCopiedItem(null);
       inputRef.current?.focus();
     });
 
