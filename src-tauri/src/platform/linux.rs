@@ -631,3 +631,49 @@ pub fn get_ffmpeg_path() -> Result<PathBuf, String> {
         cwd, possible_paths
     ))
 }
+
+pub fn get_ffprobe_path() -> Result<PathBuf, String> {
+    // Get executable directory
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
+
+    // Get current working directory
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    let possible_paths = vec![
+        // Production paths (Tauri sidecar)
+        exe_dir.join("ffprobe"),
+        exe_dir.join("binaries").join("ffprobe"),
+        // Development paths
+        cwd.join("src-tauri/binaries/ffprobe-x86_64-unknown-linux-gnu"),
+        cwd.join("binaries/ffprobe-x86_64-unknown-linux-gnu"),
+        // System ffprobe as fallback
+        PathBuf::from("/usr/bin/ffprobe"),
+        PathBuf::from("/usr/local/bin/ffprobe"),
+    ];
+
+    for path in &possible_paths {
+        if path.exists() {
+            log::info!("Found FFprobe at: {:?}", path);
+            return Ok(path.clone());
+        }
+    }
+
+    // Try to find ffprobe in PATH using which
+    if let Ok(output) = Command::new("which").arg("ffprobe").output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return Ok(PathBuf::from(path_str));
+            }
+        }
+    }
+
+    Err(format!(
+        "FFprobe not found. CWD: {:?}, Searched in: {:?}",
+        cwd, possible_paths
+    ))
+}

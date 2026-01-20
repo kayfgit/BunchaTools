@@ -19,12 +19,38 @@ export interface Settings {
   theme: "dark" | "light" | "system";
 }
 
-export type ConverterType = "image" | "audio" | "video";
+// Video Converter Types
+export interface VideoFormat {
+  id: string;
+  name: string;
+  extension: string;
+  description: string;
+}
 
-export interface SelectedFile {
+export interface VideoQualityPreset {
+  id: string;
+  name: string;
+  description: string;
+  bitrate: number; // in kbps, 0 for original
+  resolution: string; // e.g., "1920x1080" or "original"
+}
+
+export interface VideoAdvancedSettings {
+  resolution: string;
+  frameRate: string;
+  codec: string;
+  keepAudio: boolean;
+}
+
+export interface VideoFileMetadata {
   name: string;
   path: string;
   size: number;
+  duration: number; // in seconds
+  width: number;
+  height: number;
+  frameRate: number;
+  codec: string;
 }
 
 export interface PortProcess {

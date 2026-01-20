@@ -231,24 +231,6 @@ fn save_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
     save_settings_to_file(&app, &settings)
 }
 
-#[tauri::command]
-async fn convert_image(app: AppHandle, input_path: String, output_path: String) -> Result<(), String> {
-    // Emit start
-    let _ = app.emit("conversion-progress", 0);
-
-    // Load image
-    let _ = app.emit("conversion-progress", 30);
-    let img = image::open(&input_path).map_err(|e| e.to_string())?;
-
-    // Save image
-    let _ = app.emit("conversion-progress", 70);
-    img.save(&output_path).map_err(|e| e.to_string())?;
-
-    // Complete
-    let _ = app.emit("conversion-progress", 100);
-    Ok(())
-}
-
 // Helper to get media duration using ffmpeg
 fn get_media_duration(ffmpeg_path: &std::path::Path, input_path: &str) -> Option<f64> {
     let output = std::process::Command::new(ffmpeg_path)
@@ -390,6 +372,27 @@ pub struct CurrencyResult {
     pub to: String,
     pub result: f64,
     pub rate: f64,
+}
+
+// Video metadata response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoMetadata {
+    pub duration: f64,
+    pub size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub frame_rate: f64,
+    pub codec: String,
+}
+
+// Video conversion options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoConvertOptions {
+    pub resolution: String,
+    pub frame_rate: String,
+    pub codec: String,
+    pub keep_audio: bool,
+    pub bitrate: u32, // kbps, 0 for original
 }
 
 #[tauri::command]
@@ -648,6 +651,290 @@ async fn save_text_file(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
+    use std::process::Command;
+
+    // Get ffprobe path (same location as ffmpeg)
+    let ffprobe = platform::get_ffprobe_path()?;
+
+    // Get file size
+    let file_size = fs::metadata(&path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // Run ffprobe to get video info
+    let output = Command::new(&ffprobe)
+        .args([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            &path
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run ffprobe: {}", e))?;
+
+    if !output.status.success() {
+        return Err("ffprobe failed to analyze file".to_string());
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("Failed to parse ffprobe output: {}", e))?;
+
+    // Extract format info
+    let duration = data["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    // Find video stream
+    let streams = data["streams"].as_array();
+    let video_stream = streams
+        .and_then(|s| s.iter().find(|stream| stream["codec_type"] == "video"));
+
+    let (width, height, frame_rate, codec) = match video_stream {
+        Some(stream) => {
+            let w = stream["width"].as_u64().unwrap_or(0) as u32;
+            let h = stream["height"].as_u64().unwrap_or(0) as u32;
+
+            // Parse frame rate from "30/1" or "30000/1001" format
+            let fps = stream["r_frame_rate"]
+                .as_str()
+                .and_then(|s| {
+                    let parts: Vec<&str> = s.split('/').collect();
+                    if parts.len() == 2 {
+                        let num = parts[0].parse::<f64>().ok()?;
+                        let den = parts[1].parse::<f64>().ok()?;
+                        if den > 0.0 { Some(num / den) } else { None }
+                    } else {
+                        s.parse::<f64>().ok()
+                    }
+                })
+                .unwrap_or(0.0);
+
+            let codec_name = stream["codec_name"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
+
+            (w, h, fps, codec_name)
+        }
+        None => (0, 0, 0.0, "unknown".to_string()),
+    };
+
+    Ok(VideoMetadata {
+        duration,
+        size: file_size,
+        width,
+        height,
+        frame_rate,
+        codec,
+    })
+}
+
+#[tauri::command]
+async fn convert_video(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+    options: VideoConvertOptions,
+) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    let ffmpeg = platform::get_ffmpeg_path()?;
+
+    // Get total duration for progress calculation
+    let total_duration = get_media_duration(&ffmpeg, &input_path).unwrap_or(0.0);
+
+    // Emit initial progress
+    let _ = app.emit("conversion-progress", 0);
+
+    // Detect output format from extension
+    let output_ext = output_path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+
+    let is_gif = output_ext == "gif";
+    let is_webm = output_ext == "webm";
+
+    // Build ffmpeg arguments
+    let mut args: Vec<String> = vec![
+        "-i".to_string(),
+        input_path.clone(),
+        "-y".to_string(), // Overwrite output
+    ];
+
+    // Build video filter string
+    let mut vf_filters: Vec<String> = Vec::new();
+
+    // Resolution filter
+    match options.resolution.as_str() {
+        "4K" => vf_filters.push("scale=3840:-2".to_string()),
+        "1080p" => vf_filters.push("scale=1920:-2".to_string()),
+        "720p" => vf_filters.push("scale=1280:-2".to_string()),
+        "480p" => vf_filters.push("scale=854:-2".to_string()),
+        _ => {} // Keep original
+    }
+
+    if is_gif {
+        // GIF-specific encoding with palette for better quality
+        // Add fps filter for GIF (default to 15fps if not specified, max 30fps for reasonable file size)
+        let gif_fps = match options.frame_rate.as_str() {
+            "60 fps" => "30", // Cap at 30 for GIF
+            "30 fps" => "30",
+            "24 fps" => "24",
+            _ => "15", // Default for GIF
+        };
+        vf_filters.push(format!("fps={}", gif_fps));
+
+        // Add palette generation for better GIF quality
+        vf_filters.push("split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5".to_string());
+
+        if !vf_filters.is_empty() {
+            args.push("-vf".to_string());
+            args.push(vf_filters.join(","));
+        }
+
+        // GIF doesn't support audio
+        args.push("-an".to_string());
+
+        // Loop forever
+        args.push("-loop".to_string());
+        args.push("0".to_string());
+    } else {
+        // Regular video encoding
+
+        // Video codec (not applicable for GIF)
+        if is_webm {
+            // WebM typically uses VP9
+            args.push("-c:v".to_string());
+            args.push("libvpx-vp9".to_string());
+        } else {
+            match options.codec.as_str() {
+                "H.264" => {
+                    args.push("-c:v".to_string());
+                    args.push("libx264".to_string());
+                }
+                "H.265" => {
+                    args.push("-c:v".to_string());
+                    args.push("libx265".to_string());
+                }
+                "VP9" => {
+                    args.push("-c:v".to_string());
+                    args.push("libvpx-vp9".to_string());
+                }
+                "AV1" => {
+                    args.push("-c:v".to_string());
+                    args.push("libaom-av1".to_string());
+                    args.push("-cpu-used".to_string());
+                    args.push("4".to_string()); // Speed up AV1 encoding
+                }
+                _ => {} // Use default
+            }
+        }
+
+        // Apply video filters if any
+        if !vf_filters.is_empty() {
+            args.push("-vf".to_string());
+            args.push(vf_filters.join(","));
+        }
+
+        // Frame rate
+        match options.frame_rate.as_str() {
+            "60 fps" => {
+                args.push("-r".to_string());
+                args.push("60".to_string());
+            }
+            "30 fps" => {
+                args.push("-r".to_string());
+                args.push("30".to_string());
+            }
+            "24 fps" => {
+                args.push("-r".to_string());
+                args.push("24".to_string());
+            }
+            _ => {} // Keep original
+        }
+
+        // Bitrate (if not original quality)
+        if options.bitrate > 0 {
+            args.push("-b:v".to_string());
+            args.push(format!("{}k", options.bitrate));
+        }
+
+        // Audio handling
+        if options.keep_audio {
+            if is_webm {
+                // WebM uses Opus or Vorbis for audio
+                args.push("-c:a".to_string());
+                args.push("libopus".to_string());
+                args.push("-b:a".to_string());
+                args.push("128k".to_string());
+            } else {
+                args.push("-c:a".to_string());
+                args.push("aac".to_string());
+                args.push("-b:a".to_string());
+                args.push("128k".to_string());
+            }
+        } else {
+            args.push("-an".to_string()); // No audio
+        }
+    }
+
+    // Progress output
+    args.push("-progress".to_string());
+    args.push("pipe:1".to_string());
+    args.push("-nostats".to_string());
+
+    // Output path
+    args.push(output_path.clone());
+
+    // Run ffmpeg
+    let mut child = Command::new(&ffmpeg)
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    // Read progress from stdout
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        let mut last_progress = 0;
+
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                if let Some(current_time) = parse_time_from_progress(&line) {
+                    if total_duration > 0.0 {
+                        let progress = ((current_time / total_duration) * 100.0).min(99.0) as i32;
+                        let progress_rounded = (progress / 10) * 10;
+                        if progress_rounded > last_progress {
+                            last_progress = progress_rounded;
+                            let _ = app.emit("conversion-progress", progress_rounded);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Wait for process to complete
+    let status = child.wait().map_err(|e| e.to_string())?;
+
+    if !status.success() {
+        return Err("Video conversion failed".to_string());
+    }
+
+    // Emit completion
+    let _ = app.emit("conversion-progress", 100);
+    Ok(())
+}
+
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -830,7 +1117,6 @@ pub fn run() {
             set_auto_hide,
             set_dragging,
             save_window_position,
-            convert_image,
             convert_media,
             scan_port,
             kill_port_process,
@@ -838,7 +1124,9 @@ pub fn run() {
             start_text_selection,
             translate_text,
             save_binary_file,
-            save_text_file
+            save_text_file,
+            get_video_metadata,
+            convert_video
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

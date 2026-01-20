@@ -396,3 +396,36 @@ pub fn get_ffmpeg_path() -> Result<std::path::PathBuf, String> {
         cwd, possible_paths
     ))
 }
+
+pub fn get_ffprobe_path() -> Result<std::path::PathBuf, String> {
+    // Get executable directory
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
+
+    // Get current working directory
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    let possible_paths = vec![
+        // Production paths
+        exe_dir.join("ffprobe.exe"),
+        exe_dir.join("binaries").join("ffprobe.exe"),
+        // Development paths (relative to cwd)
+        cwd.join("src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe"),
+        cwd.join("binaries/ffprobe-x86_64-pc-windows-msvc.exe"),
+    ];
+
+    for path in &possible_paths {
+        if path.exists() {
+            log::info!("Found FFprobe at: {:?}", path);
+            return Ok(path.clone());
+        }
+    }
+
+    Err(format!(
+        "FFprobe not found. CWD: {:?}, Searched in: {:?}",
+        cwd, possible_paths
+    ))
+}

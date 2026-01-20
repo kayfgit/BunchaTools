@@ -6,7 +6,7 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   Pipette,
-  Repeat2,
+  Video,
   Network,
   Languages,
   Settings as SettingsIcon,
@@ -23,8 +23,8 @@ import QRCodeLib from "qrcode";
 import type {
   Tool,
   Settings,
-  ConverterType,
-  SelectedFile,
+  VideoFileMetadata,
+  VideoAdvancedSettings,
   PortProcess,
   CurrencyResult,
   TranslationResult,
@@ -35,7 +35,7 @@ import type {
 } from "./types";
 
 // Import constants
-import { FILE_FILTERS, DEFAULT_QR_DATA } from "./constants";
+import { VIDEO_FILE_FILTERS, VIDEO_QUALITY_PRESETS, DEFAULT_QR_DATA } from "./constants";
 
 // Import utils
 import {
@@ -54,7 +54,7 @@ import {
 import {
   CommandPalette,
   SettingsPanel,
-  OmniConverter,
+  VideoConverter,
   PortKiller,
   QuickTranslation,
   ColorPickerPanel,
@@ -80,17 +80,25 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+  const isDialogOpenRef = useRef(false);
   const settingsInitialized = useRef(false);
   const toolItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Converter state
-  const [showConverter, setShowConverter] = useState(false);
-  const [converterType, setConverterType] = useState<ConverterType | null>(null);
-  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
-  const [targetFormat, setTargetFormat] = useState<string | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionProgress, setConversionProgress] = useState(0);
-  const [conversionStatus, setConversionStatus] = useState<'idle' | 'converting' | 'success' | 'error'>('idle');
+  // Video Converter state
+  const [showVideoConverter, setShowVideoConverter] = useState(false);
+  const [videoFile, setVideoFile] = useState<VideoFileMetadata | null>(null);
+  const [videoFormat, setVideoFormat] = useState<string>("mp4");
+  const [videoQuality, setVideoQuality] = useState<string>("high");
+  const [videoAdvancedSettings, setVideoAdvancedSettings] = useState<VideoAdvancedSettings>({
+    resolution: "Keep Original",
+    frameRate: "Keep Original",
+    codec: "H.264",
+    keepAudio: true,
+  });
+  const [showVideoAdvanced, setShowVideoAdvanced] = useState(false);
+  const [videoConverting, setVideoConverting] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoConversionStatus, setVideoConversionStatus] = useState<'idle' | 'converting' | 'success' | 'error'>('idle');
 
   // Port killer state
   const [showPortKiller, setShowPortKiller] = useState(false);
@@ -168,17 +176,27 @@ function App() {
       },
     },
     {
-      id: "omni-converter",
-      name: "Omni Converter",
-      description: "Convert images, audio, and video files",
-      icon: Repeat2,
-      keywords: ["convert", "converter", "video", "audio", "image", "mp4", "mp3", "png", "jpg", "wav", "gif", "webp", "avi", "mkv"],
+      id: "video-converter",
+      name: "Video Converter",
+      description: "Convert videos with quality presets",
+      icon: Video,
+      keywords: ["video", "convert", "converter", "mp4", "webm", "mov", "avi", "mkv", "gif"],
       action: async () => {
         await invoke("set_auto_hide", { enabled: true });
-        setShowConverter(true);
-        setConverterType(null);
-        setSelectedFile(null);
-        setTargetFormat(null);
+        setShowVideoConverter(true);
+        setVideoFile(null);
+        setVideoFormat("mp4");
+        setVideoQuality("high");
+        setVideoAdvancedSettings({
+          resolution: "Keep Original",
+          frameRate: "Keep Original",
+          codec: "H.264",
+          keepAudio: true,
+        });
+        setShowVideoAdvanced(false);
+        setVideoConverting(false);
+        setVideoProgress(0);
+        setVideoConversionStatus('idle');
         setQuery("");
       },
     },
@@ -393,7 +411,7 @@ function App() {
   // Listen for conversion progress events
   useEffect(() => {
     const unlisten = listen<number>("conversion-progress", (event) => {
-      setConversionProgress(event.payload);
+      setVideoProgress(event.payload);
     });
 
     return () => {
@@ -408,10 +426,20 @@ function App() {
       setSelectedIndex(0);
       setStatus(null);
       setShowSettings(false);
-      setShowConverter(false);
-      setConverterType(null);
-      setSelectedFile(null);
-      setTargetFormat(null);
+      setShowVideoConverter(false);
+      setVideoFile(null);
+      setVideoFormat("mp4");
+      setVideoQuality("high");
+      setVideoAdvancedSettings({
+        resolution: "Keep Original",
+        frameRate: "Keep Original",
+        codec: "H.264",
+        keepAudio: true,
+      });
+      setShowVideoAdvanced(false);
+      setVideoConverting(false);
+      setVideoProgress(0);
+      setVideoConversionStatus('idle');
       setShowPortKiller(false);
       setPortInput("");
       setPortProcesses([]);
@@ -644,8 +672,9 @@ function App() {
       let height = 500; // Default height for command palette
       let width = 680; // Default width
 
-      if (showConverter) {
-        height = 450;
+      if (showVideoConverter) {
+        height = showVideoAdvanced ? 850 : 670;
+        width = 900;
       } else if (showPortKiller) {
         height = 450;
       } else if (showTranslation) {
@@ -666,7 +695,7 @@ function App() {
       await appWindow.setSize(new LogicalSize(width, height));
     };
     resizeWindow();
-  }, [showSettings, showConverter, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
+  }, [showSettings, showVideoConverter, showVideoAdvanced, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -680,11 +709,21 @@ function App() {
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
-      if (showConverter) {
-        setShowConverter(false);
-        setConverterType(null);
-        setSelectedFile(null);
-        setTargetFormat(null);
+      if (showVideoConverter) {
+        setShowVideoConverter(false);
+        setVideoFile(null);
+        setVideoFormat("mp4");
+        setVideoQuality("high");
+        setVideoAdvancedSettings({
+          resolution: "Keep Original",
+          frameRate: "Keep Original",
+          codec: "H.264",
+          keepAudio: true,
+        });
+        setShowVideoAdvanced(false);
+        setVideoConverting(false);
+        setVideoProgress(0);
+        setVideoConversionStatus('idle');
       } else if (showPortKiller) {
         setShowPortKiller(false);
         setPortInput("");
@@ -702,7 +741,7 @@ function App() {
         invoke("hide_window");
         setQuery("");
       }
-    } else if (!showSettings && !showConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
+    } else if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -885,16 +924,26 @@ function App() {
     };
   }, [showColorPicker]);
 
-  // Omni Converter blur handler (prevents flickering on reopen)
+  // Video Converter blur handler (prevents flickering on reopen)
   useEffect(() => {
-    if (!showConverter) return;
+    if (!showVideoConverter) return;
 
     const handleBlur = () => {
-      if (!isDraggingRef.current) {
-        setShowConverter(false);
-        setConverterType(null);
-        setSelectedFile(null);
-        setTargetFormat(null);
+      if (!isDraggingRef.current && !isDialogOpenRef.current) {
+        setShowVideoConverter(false);
+        setVideoFile(null);
+        setVideoFormat("mp4");
+        setVideoQuality("high");
+        setVideoAdvancedSettings({
+          resolution: "Keep Original",
+          frameRate: "Keep Original",
+          codec: "H.264",
+          keepAudio: true,
+        });
+        setShowVideoAdvanced(false);
+        setVideoConverting(false);
+        setVideoProgress(0);
+        setVideoConversionStatus('idle');
       }
     };
 
@@ -903,7 +952,7 @@ function App() {
     return () => {
       window.removeEventListener("blur", handleBlur);
     };
-  }, [showConverter]);
+  }, [showVideoConverter]);
 
   // Port Killer blur handler (prevents flickering on reopen)
   useEffect(() => {
@@ -945,7 +994,7 @@ function App() {
   // Command palette blur handler (hides window on blur)
   useEffect(() => {
     // Only handle blur when command palette is visible (no other panel is open)
-    const isCommandPaletteVisible = !showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester;
+    const isCommandPaletteVisible = !showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester;
     if (!isCommandPaletteVisible) return;
 
     const handleBlur = async () => {
@@ -959,7 +1008,7 @@ function App() {
     return () => {
       window.removeEventListener("blur", handleBlur);
     };
-  }, [showConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -1011,83 +1060,164 @@ function App() {
     }
   };
 
-  // Handle file selection via dialog
-  const handleSelectFile = async () => {
-    if (!converterType) return;
+  // Handle video file selection via dialog
+  const handleVideoSelectFile = async () => {
+    // Mark dialog as open to prevent blur handler from closing
+    isDialogOpenRef.current = true;
+    await invoke("set_auto_hide", { enabled: false });
+
     const result = await open({
-      filters: FILE_FILTERS[converterType],
+      filters: VIDEO_FILE_FILTERS,
       multiple: false,
     });
+
+    // Re-enable after dialog closes
+    await invoke("set_auto_hide", { enabled: true });
+    isDialogOpenRef.current = false;
+
     if (result) {
-      // Get file info
       const path = result as string;
       const name = path.split(/[\\/]/).pop() || "";
-      // We'll estimate size client-side or could add a backend command
-      setSelectedFile({ name, path, size: 0 });
-      setTargetFormat(null);
+
+      // Get video metadata from backend
+      try {
+        const metadata = await invoke<{
+          duration: number;
+          size: number;
+          width: number;
+          height: number;
+          frame_rate: number;
+          codec: string;
+        }>("get_video_metadata", { path });
+
+        setVideoFile({
+          name,
+          path,
+          size: metadata.size,
+          duration: metadata.duration,
+          width: metadata.width,
+          height: metadata.height,
+          frameRate: metadata.frame_rate,
+          codec: metadata.codec,
+        });
+      } catch (e) {
+        console.error("Failed to get video metadata:", e);
+        // Still allow selection with minimal info
+        setVideoFile({
+          name,
+          path,
+          size: 0,
+          duration: 0,
+          width: 0,
+          height: 0,
+          frameRate: 0,
+          codec: "unknown",
+        });
+      }
     }
   };
 
-  // Handle conversion
-  const handleConvert = async () => {
-    if (!selectedFile || !targetFormat || !converterType) return;
+  // Handle video conversion
+  const handleVideoConvert = async () => {
+    if (!videoFile) return;
 
-    const ext = targetFormat.toLowerCase();
-    const defaultName = selectedFile.name.replace(/\.[^.]+$/, `.${ext}`);
+    const ext = videoFormat.toLowerCase();
+    const defaultName = videoFile.name.replace(/\.[^.]+$/, `.${ext}`);
+
+    // Mark dialog as open to prevent blur handler from closing
+    isDialogOpenRef.current = true;
+    await invoke("set_auto_hide", { enabled: false });
 
     const outputPath = await save({
       defaultPath: defaultName,
-      filters: [{ name: targetFormat, extensions: [ext] }],
+      filters: [{ name: videoFormat.toUpperCase(), extensions: [ext] }],
     });
+
+    // Re-enable after dialog closes
+    await invoke("set_auto_hide", { enabled: true });
+    isDialogOpenRef.current = false;
 
     if (!outputPath) return;
 
-    setIsConverting(true);
-    setConversionProgress(0);
-    setConversionStatus('converting');
+    setVideoConverting(true);
+    setVideoProgress(0);
+    setVideoConversionStatus('converting');
+
+    // Get bitrate from selected quality preset
+    const selectedPreset = VIDEO_QUALITY_PRESETS.find(p => p.id === videoQuality);
+    const bitrate = selectedPreset?.bitrate || 0;
 
     try {
-      if (converterType === "image") {
-        await invoke("convert_image", { inputPath: selectedFile.path, outputPath });
-      } else {
-        await invoke("convert_media", { inputPath: selectedFile.path, outputPath });
-      }
+      await invoke("convert_video", {
+        inputPath: videoFile.path,
+        outputPath,
+        options: {
+          resolution: videoAdvancedSettings.resolution,
+          frame_rate: videoAdvancedSettings.frameRate,
+          codec: videoAdvancedSettings.codec,
+          keep_audio: videoAdvancedSettings.keepAudio,
+          bitrate,
+        },
+      });
 
       // Show success state
-      setConversionStatus('success');
-      setConversionProgress(100);
+      setVideoConversionStatus('success');
+      setVideoProgress(100);
 
       // Wait a moment to show success, then close
       setTimeout(async () => {
         await invoke("set_auto_hide", { enabled: true });
-        setShowConverter(false);
-        setConverterType(null);
-        setSelectedFile(null);
-        setTargetFormat(null);
-        setIsConverting(false);
-        setConversionStatus('idle');
-        setConversionProgress(0);
+        setShowVideoConverter(false);
+        setVideoFile(null);
+        setVideoFormat("mp4");
+        setVideoQuality("high");
+        setVideoAdvancedSettings({
+          resolution: "Keep Original",
+          frameRate: "Keep Original",
+          codec: "H.264",
+          keepAudio: true,
+        });
+        setShowVideoAdvanced(false);
+        setVideoConverting(false);
+        setVideoConversionStatus('idle');
+        setVideoProgress(0);
       }, 1500);
     } catch (e) {
-      console.error("Conversion error:", e);
-      setConversionStatus('error');
-      // Show error in status bar
+      console.error("Video conversion error:", e);
+      setVideoConversionStatus('error');
       setStatus(String(e));
 
       // Reset after showing error
       setTimeout(() => {
-        setIsConverting(false);
-        setConversionStatus('idle');
-        setConversionProgress(0);
+        setVideoConverting(false);
+        setVideoConversionStatus('idle');
+        setVideoProgress(0);
         setStatus(null);
       }, 4000);
     }
   };
 
+  // Handle video converter reset
+  const handleVideoReset = () => {
+    setVideoFile(null);
+    setVideoFormat("mp4");
+    setVideoQuality("high");
+    setVideoAdvancedSettings({
+      resolution: "Keep Original",
+      frameRate: "Keep Original",
+      codec: "H.264",
+      keepAudio: true,
+    });
+    setShowVideoAdvanced(false);
+    setVideoConverting(false);
+    setVideoProgress(0);
+    setVideoConversionStatus('idle');
+  };
+
   return (
     <div className="p-2 select-none" spellCheck={false}>
       {/* Command Palette - Hidden when tools are open */}
-      {!showConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
+      {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
         <CommandPalette
           query={query}
           setQuery={setQuery}
@@ -1118,20 +1248,25 @@ function App() {
         />
       )}
 
-      {/* Converter Panel */}
-      {showConverter && (
-        <OmniConverter
-          converterType={converterType}
-          setConverterType={setConverterType}
-          selectedFile={selectedFile}
-          setSelectedFile={setSelectedFile}
-          targetFormat={targetFormat}
-          setTargetFormat={setTargetFormat}
-          isConverting={isConverting}
-          conversionProgress={conversionProgress}
-          conversionStatus={conversionStatus}
-          onSelectFile={handleSelectFile}
-          onConvert={handleConvert}
+      {/* Video Converter Panel */}
+      {showVideoConverter && (
+        <VideoConverter
+          videoFile={videoFile}
+          setVideoFile={setVideoFile}
+          selectedFormat={videoFormat}
+          setSelectedFormat={setVideoFormat}
+          selectedQuality={videoQuality}
+          setSelectedQuality={setVideoQuality}
+          advancedSettings={videoAdvancedSettings}
+          setAdvancedSettings={setVideoAdvancedSettings}
+          showAdvanced={showVideoAdvanced}
+          setShowAdvanced={setShowVideoAdvanced}
+          isConverting={videoConverting}
+          conversionProgress={videoProgress}
+          conversionStatus={videoConversionStatus}
+          onSelectFile={handleVideoSelectFile}
+          onConvert={handleVideoConvert}
+          onReset={handleVideoReset}
           onDragStart={handleDragStart}
         />
       )}

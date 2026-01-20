@@ -822,3 +822,31 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+// ============ Video Converter Utilities ============
+
+// Format video duration as MM:SS or HH:MM:SS
+export function formatDuration(seconds: number): string {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Estimate output file size based on bitrate and duration
+export function estimateOutputSize(
+  duration: number,
+  bitrate: number,
+  hasAudio: boolean
+): number {
+  // bitrate in kbps, duration in seconds
+  // Returns estimated size in bytes
+  if (bitrate === 0) return 0; // Original quality - can't estimate
+  const videoBits = bitrate * 1000 * duration;
+  const audioBits = hasAudio ? 128 * 1000 * duration : 0; // assume 128kbps audio
+  return Math.floor((videoBits + audioBits) / 8);
+}

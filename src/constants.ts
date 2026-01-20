@@ -8,22 +8,47 @@ import {
   MapPin,
   Calendar,
   LucideIcon,
+  Sparkles,
+  Zap,
+  Film,
+  Clapperboard,
+  Settings2,
 } from "lucide-react";
-import type { QRCodeType, QRCodeData, UnitCategory } from "./types";
+import type { QRCodeType, QRCodeData, UnitCategory, VideoFormat, VideoQualityPreset } from "./types";
 
-// Format options for converter
-export const FORMAT_OPTIONS = {
-  image: ["PNG", "JPG", "WEBP", "GIF", "BMP", "ICO"],
-  audio: ["MP3", "WAV", "FLAC", "AAC", "OGG", "M4A"],
-  video: ["MP4", "AVI", "MOV", "GIF", "WEBM", "MKV"],
+// Video Converter Constants
+export const VIDEO_FORMATS: VideoFormat[] = [
+  { id: "mp4", name: "MP4", extension: ".mp4", description: "Most compatible" },
+  { id: "webm", name: "WebM", extension: ".webm", description: "Web optimized" },
+  { id: "mov", name: "MOV", extension: ".mov", description: "Apple format" },
+  { id: "avi", name: "AVI", extension: ".avi", description: "Legacy format" },
+  { id: "mkv", name: "MKV", extension: ".mkv", description: "High quality" },
+  { id: "gif", name: "GIF", extension: ".gif", description: "Animated image" },
+];
+
+export const VIDEO_QUALITY_PRESETS: VideoQualityPreset[] = [
+  { id: "original", name: "Original", description: "Keep original quality", bitrate: 0, resolution: "original" },
+  { id: "high", name: "High", description: "1080p, high bitrate", bitrate: 8000, resolution: "1920x1080" },
+  { id: "medium", name: "Medium", description: "720p, balanced", bitrate: 4000, resolution: "1280x720" },
+  { id: "low", name: "Low", description: "480p, smaller file", bitrate: 2000, resolution: "854x480" },
+  { id: "web", name: "Web", description: "Optimized for web", bitrate: 1500, resolution: "1280x720" },
+];
+
+export const VIDEO_QUALITY_ICONS: Record<string, LucideIcon> = {
+  original: Sparkles,
+  high: Zap,
+  medium: Film,
+  low: Clapperboard,
+  web: Settings2,
 };
 
-// File type filters for open dialog
-export const FILE_FILTERS = {
-  image: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "tiff"] }],
-  audio: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "aac", "ogg", "m4a", "wma"] }],
-  video: [{ name: "Video", extensions: ["mp4", "avi", "mov", "mkv", "webm", "wmv", "flv"] }],
-};
+export const VIDEO_RESOLUTIONS = ["Keep Original", "4K", "1080p", "720p", "480p"];
+export const VIDEO_FRAMERATES = ["Keep Original", "60 fps", "30 fps", "24 fps"];
+export const VIDEO_CODECS = ["H.264", "H.265", "VP9", "AV1"];
+
+export const VIDEO_FILE_FILTERS = [
+  { name: "Video", extensions: ["mp4", "avi", "mov", "mkv", "webm", "wmv", "flv", "m4v"] }
+];
 
 // Common ports for port killer
 export const COMMON_PORTS = [3000, 3001, 5173, 8080, 8000, 4200, 5000, 1420];
