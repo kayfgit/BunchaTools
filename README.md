@@ -59,7 +59,7 @@ Convert between currencies in real-time using natural queries.
 ### Color Picker
 Pick any color from anywhere on your screen. Click to capture and choose from all of the relevant color formats for professionals.
 
-### Omni Converter
+### Converters
 Convert media files locally without uploading to sketchy websites or dealing with watermarks.
 
 **Supported formats:**
@@ -104,6 +104,21 @@ Generate QR codes instantly for various use cases without relying on online gene
 - Export to PNG, SVG, or PDF formats
 
 All QR codes are generated locally on your machine.
+
+### Regex Tester
+Test and debug regular expressions with real-time feedback. No need to visit online regex testing sites.
+
+**Features:**
+- Real-time pattern matching as you type
+- Flag toggles: global (g), case insensitive (i), multiline (m), dot-all (s)
+- View all matches with their positions in the test string
+- Capture group extraction and visualization
+- Find-and-replace preview with highlighted replacements
+- Support for group references ($1, $2, etc.) in replacements
+- Copy pattern with flags, individual matches, or replacement results
+- Built-in quick reference for common regex patterns
+
+All regex testing happens locally in your browser.
 
 # Installation
 

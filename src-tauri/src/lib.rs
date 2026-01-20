@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -11,6 +12,19 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 // Platform-specific implementations
 mod platform;
+
+/// Creates a Command that hides the console window on Windows.
+/// On other platforms, returns a regular Command.
+fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
 
 // Settings structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,7 +247,7 @@ fn save_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
 
 // Helper to get media duration using ffmpeg
 fn get_media_duration(ffmpeg_path: &std::path::Path, input_path: &str) -> Option<f64> {
-    let output = std::process::Command::new(ffmpeg_path)
+    let output = hidden_command(ffmpeg_path)
         .args(["-i", input_path])
         .output()
         .ok()?;
@@ -287,7 +301,7 @@ async fn convert_media(
     output_path: String,
 ) -> Result<(), String> {
     use std::io::{BufRead, BufReader};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     // Get bundled ffmpeg path using platform-specific resolution
     let ffmpeg = platform::get_ffmpeg_path()?;
@@ -299,7 +313,7 @@ async fn convert_media(
     let _ = app.emit("conversion-progress", 0);
 
     // Run ffmpeg with progress output
-    let mut child = Command::new(&ffmpeg)
+    let mut child = hidden_command(&ffmpeg)
         .args([
             "-i", &input_path,
             "-y",
@@ -653,8 +667,6 @@ async fn save_text_file(path: String, content: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
-    use std::process::Command;
-
     // Get ffprobe path (same location as ffmpeg)
     let ffprobe = platform::get_ffprobe_path()?;
 
@@ -664,7 +676,7 @@ async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
         .unwrap_or(0);
 
     // Run ffprobe to get video info
-    let output = Command::new(&ffprobe)
+    let output = hidden_command(&ffprobe)
         .args([
             "-v", "quiet",
             "-print_format", "json",
@@ -742,7 +754,7 @@ async fn convert_video(
     options: VideoConvertOptions,
 ) -> Result<(), String> {
     use std::io::{BufRead, BufReader};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let ffmpeg = platform::get_ffmpeg_path()?;
 
@@ -895,7 +907,7 @@ async fn convert_video(
     args.push(output_path.clone());
 
     // Run ffmpeg
-    let mut child = Command::new(&ffmpeg)
+    let mut child = hidden_command(&ffmpeg)
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

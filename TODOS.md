@@ -1,4 +1,4 @@
-[] - Fix broken video converter on current release (After selecting file to be converted nothing happens)
+[x] - Fix broken video converter on current release (After selecting file to be converted nothing happens)
 [] - Fix flickering in between transitions 
 [] - Fix icons (It's off center)
 [] - Remake the unit and currency converter to be smoother
@@ -15,3 +15,4 @@
 [x] - Polish Regex Tester tool
 [x] - Add quick color converter in the command palette (oklch(0.6 0 0) to hex)
 [?] - Add compatibility to linux (Haven't tested yet)
+[] - Polish video converter 
