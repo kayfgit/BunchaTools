@@ -118,8 +118,6 @@ Test and debug regular expressions with real-time feedback. No need to visit onl
 - Copy pattern with flags, individual matches, or replacement results
 - Built-in quick reference for common regex patterns
 
-All regex testing happens locally in your browser.
-
 # Installation
 
 ### Download
