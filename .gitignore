@@ -19,3 +19,6 @@ pnpm-debug.log*
 /src-tauri/bin/
 /src-tauri/gen/
 **/*.rs.bk
+
+# Claudia
+.claude
