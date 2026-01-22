@@ -18,3 +18,4 @@
 [x] - Polish video converter 
 [] - Add the rest of the converters (Audio, Image and Documents)
 [x] - Fix sizing of everything
+[] - Fix stutter when opening app (Probably the animations)

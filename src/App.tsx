@@ -78,6 +78,7 @@ function App() {
     theme: "dark",
   });
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
+  const [animationKey, setAnimationKey] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
@@ -417,6 +418,7 @@ function App() {
   useEffect(() => {
     const unlisten = listen("focus-search", async () => {
       await invoke("set_auto_hide", { enabled: true });
+      setAnimationKey((k) => k + 1);
       setQuery("");
       setSelectedIndex(0);
       setStatus(null);
@@ -1212,7 +1214,12 @@ function App() {
   };
 
   return (
-    <div ref={contentRef} className="p-2 select-none" spellCheck={false}>
+    <div
+      key={animationKey}
+      ref={contentRef}
+      className="select-none animate-window-show"
+      spellCheck={false}
+    >
       {/* Command Palette - Hidden when tools are open */}
       {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
         <CommandPalette

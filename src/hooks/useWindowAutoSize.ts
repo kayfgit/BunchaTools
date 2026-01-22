@@ -75,7 +75,7 @@ export function useWindowAutoSize<T extends HTMLElement>({
     if (!contentRef.current || !enabled) return;
 
     const contentHeight = contentRef.current.scrollHeight;
-    const padding = config.padding ?? 16; // Default 8px padding on each side (p-2)
+    const padding = config.padding ?? 0;
     let targetHeight = contentHeight + padding;
 
     // Apply constraints
