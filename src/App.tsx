@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { useWindowAutoSize } from "./hooks";
 import {
   Pipette,
   Video,
@@ -653,37 +654,33 @@ function App() {
     }
   }, [selectedIndex]);
 
-  // Resize window based on active view
-  useEffect(() => {
-    const resizeWindow = async () => {
-      const appWindow = getCurrentWindow();
-      let height = 500; // Default height for command palette
-      let width = 680; // Default width
+  // Window size configuration based on active view
+  const windowSizeConfig = useMemo(() => {
+    if (showVideoConverter) {
+      return { width: 900, minHeight: 400, maxHeight: 900 };
+    } else if (showPortKiller) {
+      return { width: 680, minHeight: 300, maxHeight: 600 };
+    } else if (showTranslation) {
+      return { width: 680, minHeight: 300, maxHeight: 600 };
+    } else if (showSettings) {
+      return { width: 680, minHeight: 200, maxHeight: 500 };
+    } else if (showColorPicker) {
+      return { width: 880, minHeight: 400, maxHeight: 700 };
+    } else if (showQRGenerator) {
+      return { width: showQRCustomization ? 1000 : 800, minHeight: 400, maxHeight: 700 };
+    } else if (showRegexTester) {
+      return { width: 1000, minHeight: 400, maxHeight: 700 };
+    }
+    // Command palette
+    return { width: 680, minHeight: 200, maxHeight: 550 };
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
 
-      if (showVideoConverter) {
-        height = showVideoAdvanced ? 850 : 670;
-        width = 900;
-      } else if (showPortKiller) {
-        height = 450;
-      } else if (showTranslation) {
-        height = isTranslationSettingsOpen ? 530 : 450;
-      } else if (showSettings) {
-        height = 460;
-      } else if (showColorPicker) {
-        height = 600;
-        width = 880;
-      } else if (showQRGenerator) {
-        height = showQRCustomization ? 800 : 600;
-        width = showQRCustomization ? 1000 : 800;
-      } else if (showRegexTester) {
-        height = 590;
-        width = 1000;
-      }
-
-      await appWindow.setSize(new LogicalSize(width, height));
-    };
-    resizeWindow();
-  }, [showSettings, showVideoConverter, showVideoAdvanced, showPortKiller, showTranslation, isTranslationSettingsOpen, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
+  // Auto-resize window based on content
+  const { contentRef } = useWindowAutoSize<HTMLDivElement>({
+    config: windowSizeConfig,
+    enabled: true,
+    animationDuration: 150,
+  });
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -1215,7 +1212,7 @@ function App() {
   };
 
   return (
-    <div className="p-2 select-none" spellCheck={false}>
+    <div ref={contentRef} className="p-2 select-none" spellCheck={false}>
       {/* Command Palette - Hidden when tools are open */}
       {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
         <CommandPalette

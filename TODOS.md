@@ -17,5 +17,4 @@
 [x] - Add compatibility to linux (Works on some distros)
 [x] - Polish video converter 
 [] - Add the rest of the converters (Audio, Image and Documents)
-
-[] - Fix sizing of everything
+[x] - Fix sizing of everything
