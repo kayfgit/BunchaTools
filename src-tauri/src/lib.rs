@@ -161,6 +161,9 @@ fn parse_shortcut(modifiers: &[String], key: &str) -> Option<Shortcut> {
 
 #[tauri::command]
 fn hide_window(window: tauri::Window) {
+    #[cfg(target_os = "windows")]
+    platform::stop_click_outside_hook();
+
     let _ = window.hide();
 }
 
@@ -237,13 +240,6 @@ fn set_dragging(app: AppHandle, dragging: bool) {
     *state.is_dragging.lock().unwrap() = dragging;
 }
 
-#[tauri::command]
-fn save_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let mut settings = state.settings.lock().unwrap();
-    settings.window_position = Some((x, y));
-    save_settings_to_file(&app, &settings)
-}
 
 // Helper to get media duration using ffmpeg
 fn get_media_duration(ffmpeg_path: &std::path::Path, input_path: &str) -> Option<f64> {
@@ -667,74 +663,110 @@ async fn save_text_file(path: String, content: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
-    // Get ffprobe path (same location as ffmpeg)
-    let ffprobe = platform::get_ffprobe_path()?;
-
-    // Get file size
+    // Get file size first - this should always work
     let file_size = fs::metadata(&path)
         .map(|m| m.len())
         .unwrap_or(0);
 
-    // Run ffprobe to get video info
-    let output = hidden_command(&ffprobe)
-        .args([
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_format",
-            "-show_streams",
-            &path
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run ffprobe: {}", e))?;
+    // Use ffmpeg to get video info (ffprobe may not be available)
+    let ffmpeg = match platform::get_ffmpeg_path() {
+        Ok(p) => p,
+        Err(_) => {
+            // Return partial metadata with just file size
+            return Ok(VideoMetadata {
+                duration: 0.0,
+                size: file_size,
+                width: 0,
+                height: 0,
+                frame_rate: 0.0,
+                codec: "unknown".to_string(),
+            });
+        }
+    };
 
-    if !output.status.success() {
-        return Err("ffprobe failed to analyze file".to_string());
+    // Run ffmpeg -i to get video info from stderr
+    let output = match hidden_command(&ffmpeg)
+        .args(["-i", &path])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => {
+            return Ok(VideoMetadata {
+                duration: 0.0,
+                size: file_size,
+                width: 0,
+                height: 0,
+                frame_rate: 0.0,
+                codec: "unknown".to_string(),
+            });
+        }
+    };
+
+    // FFmpeg outputs info to stderr (exit code will be non-zero since no output specified, that's ok)
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Parse duration from "Duration: HH:MM:SS.ms"
+    let mut duration = 0.0;
+    for line in stderr.lines() {
+        if line.contains("Duration:") {
+            if let Some(duration_str) = line.split("Duration:").nth(1) {
+                if let Some(duration_part) = duration_str.split(',').next() {
+                    let parts: Vec<&str> = duration_part.trim().split(':').collect();
+                    if parts.len() == 3 {
+                        if let (Ok(h), Ok(m), Ok(s)) = (
+                            parts[0].parse::<f64>(),
+                            parts[1].parse::<f64>(),
+                            parts[2].parse::<f64>(),
+                        ) {
+                            duration = h * 3600.0 + m * 60.0 + s;
+                        }
+                    }
+                }
+            }
+            break;
+        }
     }
 
-    let json_str = String::from_utf8_lossy(&output.stdout);
-    let data: serde_json::Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("Failed to parse ffprobe output: {}", e))?;
+    // Parse video stream info: "Stream #0:0: Video: h264 ..., 1920x1080 [SAR ...], 30 fps"
+    let mut width = 0u32;
+    let mut height = 0u32;
+    let mut frame_rate = 0.0;
+    let mut codec = "unknown".to_string();
 
-    // Extract format info
-    let duration = data["format"]["duration"]
-        .as_str()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    for line in stderr.lines() {
+        if line.contains("Stream") && line.contains("Video:") {
+            // Extract codec (first word after "Video: ")
+            if let Some(video_part) = line.split("Video:").nth(1) {
+                let video_info = video_part.trim();
+                // Codec is the first word (e.g., "h264" or "hevc")
+                if let Some(codec_name) = video_info.split(|c: char| c == ' ' || c == ',').next() {
+                    codec = codec_name.to_string();
+                }
 
-    // Find video stream
-    let streams = data["streams"].as_array();
-    let video_stream = streams
-        .and_then(|s| s.iter().find(|stream| stream["codec_type"] == "video"));
-
-    let (width, height, frame_rate, codec) = match video_stream {
-        Some(stream) => {
-            let w = stream["width"].as_u64().unwrap_or(0) as u32;
-            let h = stream["height"].as_u64().unwrap_or(0) as u32;
-
-            // Parse frame rate from "30/1" or "30000/1001" format
-            let fps = stream["r_frame_rate"]
-                .as_str()
-                .and_then(|s| {
-                    let parts: Vec<&str> = s.split('/').collect();
-                    if parts.len() == 2 {
-                        let num = parts[0].parse::<f64>().ok()?;
-                        let den = parts[1].parse::<f64>().ok()?;
-                        if den > 0.0 { Some(num / den) } else { None }
-                    } else {
-                        s.parse::<f64>().ok()
+                // Extract resolution (pattern like "1920x1080" or "1280x720")
+                let re_resolution = regex::Regex::new(r"(\d{2,5})x(\d{2,5})").ok();
+                if let Some(re) = re_resolution {
+                    if let Some(caps) = re.captures(video_info) {
+                        if let (Some(w), Some(h)) = (caps.get(1), caps.get(2)) {
+                            width = w.as_str().parse().unwrap_or(0);
+                            height = h.as_str().parse().unwrap_or(0);
+                        }
                     }
-                })
-                .unwrap_or(0.0);
+                }
 
-            let codec_name = stream["codec_name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-
-            (w, h, fps, codec_name)
+                // Extract frame rate (pattern like "30 fps" or "29.97 fps" or "30 tbr")
+                let re_fps = regex::Regex::new(r"(\d+(?:\.\d+)?)\s*(?:fps|tbr)").ok();
+                if let Some(re) = re_fps {
+                    if let Some(caps) = re.captures(video_info) {
+                        if let Some(fps_match) = caps.get(1) {
+                            frame_rate = fps_match.as_str().parse().unwrap_or(0.0);
+                        }
+                    }
+                }
+            }
+            break;
         }
-        None => (0, 0, 0.0, "unknown".to_string()),
-    };
+    }
 
     Ok(VideoMetadata {
         duration,
@@ -795,12 +827,24 @@ async fn convert_video(
 
     if is_gif {
         // GIF-specific encoding with palette for better quality
-        // Add fps filter for GIF (default to 15fps if not specified, max 30fps for reasonable file size)
-        let gif_fps = match options.frame_rate.as_str() {
-            "60 fps" => "30", // Cap at 30 for GIF
-            "30 fps" => "30",
-            "24 fps" => "24",
-            _ => "15", // Default for GIF
+        // Determine GIF fps based on quality preset (bitrate as proxy) and frame rate setting
+        let gif_fps = if options.frame_rate != "Keep Original" {
+            // User explicitly set frame rate
+            match options.frame_rate.as_str() {
+                "60 fps" => "30", // Cap at 30 for GIF
+                "30 fps" => "30",
+                "24 fps" => "24",
+                _ => "15",
+            }
+        } else {
+            // Use bitrate as quality indicator for GIF fps
+            match options.bitrate {
+                0 => "24",           // Original quality: 24 fps
+                b if b >= 8000 => "24",  // High quality: 24 fps
+                b if b >= 4000 => "15",  // Medium quality: 15 fps
+                b if b >= 2000 => "12",  // Low quality: 12 fps
+                _ => "10",               // Web/lowest: 10 fps
+            }
         };
         vf_filters.push(format!("fps={}", gif_fps));
 
@@ -950,20 +994,49 @@ async fn convert_video(
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
+            // Stop click-outside hook when hiding
+            #[cfg(target_os = "windows")]
+            platform::stop_click_outside_hook();
+
             let _ = window.hide();
         } else {
-            // Check for saved position
-            let state = app.state::<AppState>();
-            let settings = state.settings.lock().unwrap();
-            if let Some((x, y)) = settings.window_position {
-                use tauri::LogicalPosition;
-                let _ = window.set_position(LogicalPosition::new(x, y));
-            } else {
+            // Position window on the monitor where the cursor is located
+            #[cfg(target_os = "windows")]
+            {
+                // Get current window size
+                if let Ok(size) = window.outer_size() {
+                    if let Some((x, y)) = platform::get_centered_position_on_cursor_monitor(
+                        size.width as i32,
+                        size.height as i32,
+                    ) {
+                        use tauri::PhysicalPosition;
+                        let _ = window.set_position(PhysicalPosition::new(x, y));
+                    } else {
+                        let _ = window.center();
+                    }
+                } else {
+                    let _ = window.center();
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
                 let _ = window.center();
             }
-            drop(settings); // Release lock before show
             let _ = window.show();
             let _ = window.set_focus();
+
+            // Start click-outside hook after showing
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(hwnd) = window.hwnd() {
+                    let window_clone = window.clone();
+                    platform::start_click_outside_hook(hwnd.0 as isize, move || {
+                        let _ = window_clone.hide();
+                        platform::stop_click_outside_hook();
+                    });
+                }
+            }
+
             let _ = app.emit("focus-search", ());
         }
     } else {
@@ -1093,24 +1166,17 @@ pub fn run() {
                 let window_clone = window.clone();
                 let app_handle_for_blur = app.handle().clone();
                 window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::Focused(false) => {
-                            let state = app_handle_for_blur.state::<AppState>();
-                            let auto_hide = *state.auto_hide_enabled.lock().unwrap();
-                            let is_dragging = *state.is_dragging.lock().unwrap();
-                            // Don't hide if dragging or auto_hide is disabled
-                            if auto_hide && !is_dragging {
-                                let _ = window_clone.hide();
-                            }
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        let state = app_handle_for_blur.state::<AppState>();
+                        let auto_hide = *state.auto_hide_enabled.lock().unwrap();
+                        let is_dragging = *state.is_dragging.lock().unwrap();
+                        // Don't hide if dragging or auto_hide is disabled
+                        if auto_hide && !is_dragging {
+                            #[cfg(target_os = "windows")]
+                            platform::stop_click_outside_hook();
+
+                            let _ = window_clone.hide();
                         }
-                        tauri::WindowEvent::Moved(position) => {
-                            // Save position when window is moved
-                            let state = app_handle_for_blur.state::<AppState>();
-                            let mut settings = state.settings.lock().unwrap();
-                            settings.window_position = Some((position.x, position.y));
-                            let _ = save_settings_to_file(&app_handle_for_blur, &settings);
-                        }
-                        _ => {}
                     }
                 });
             } else {
@@ -1128,7 +1194,6 @@ pub fn run() {
             get_launch_at_startup,
             set_auto_hide,
             set_dragging,
-            save_window_position,
             convert_media,
             scan_port,
             kill_port_process,

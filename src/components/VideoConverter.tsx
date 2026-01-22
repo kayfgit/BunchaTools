@@ -62,10 +62,22 @@ export function VideoConverter({
   onReset,
   onDragStart,
 }: VideoConverterProps) {
+  // Helper to convert preset resolution format to estimation format
+  const getResolutionLabel = (presetResolution: string): string => {
+    const resolutionMap: Record<string, string> = {
+      "3840x2160": "4K",
+      "1920x1080": "1080p",
+      "1280x720": "720p",
+      "854x480": "480p",
+    };
+    return resolutionMap[presetResolution] || "original";
+  };
+
   // Get the selected quality preset for estimated output calculation
   const selectedPreset = VIDEO_QUALITY_PRESETS.find(p => p.id === selectedQuality);
+  const presetResolution = selectedPreset ? getResolutionLabel(selectedPreset.resolution) : "original";
   const estimatedSize = videoFile && selectedPreset && selectedPreset.bitrate > 0
-    ? estimateOutputSize(videoFile.duration, selectedPreset.bitrate, advancedSettings.keepAudio)
+    ? estimateOutputSize(videoFile.duration, selectedPreset.bitrate, advancedSettings.keepAudio, selectedFormat, presetResolution)
     : 0;
 
   return (
@@ -283,9 +295,18 @@ export function VideoConverter({
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-buncha-text-muted font-mono">
-                            {preset.bitrate > 0 ? `${preset.bitrate / 1000} Mbps` : "—"}
-                          </span>
+                          <div className="text-right">
+                            <span className="text-xs text-buncha-text-muted font-mono block">
+                              {preset.bitrate > 0 ? `${preset.bitrate / 1000} Mbps` : "—"}
+                            </span>
+                            {preset.bitrate > 0 && (
+                              <span className="text-[10px] text-buncha-text-muted/70 font-mono block">
+                                {videoFile && videoFile.duration > 0
+                                  ? `~${formatFileSize(estimateOutputSize(videoFile.duration, preset.bitrate, advancedSettings.keepAudio, selectedFormat, getResolutionLabel(preset.resolution)))}`
+                                  : "—"}
+                              </span>
+                            )}
+                          </div>
                           {selectedQuality === preset.id && <Check className="w-4 h-4 text-buncha-accent" />}
                         </div>
                       </button>

@@ -837,15 +837,47 @@ export function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Estimate output file size based on bitrate and duration
+// Estimate output file size based on bitrate, duration, and format
 export function estimateOutputSize(
   duration: number,
   bitrate: number,
-  hasAudio: boolean
+  hasAudio: boolean,
+  format: string = "mp4",
+  resolution: string = "original"
 ): number {
   // bitrate in kbps, duration in seconds
   // Returns estimated size in bytes
   if (bitrate === 0) return 0; // Original quality - can't estimate
+
+  if (format === "gif") {
+    // GIF estimation based on resolution and fps (fps derived from bitrate/quality)
+    // GIF doesn't use bitrate - estimate based on resolution and frame rate
+    let width = 1920, height = 1080; // default
+    let fps = 15;
+
+    // Determine resolution
+    switch (resolution) {
+      case "480p": width = 854; height = 480; break;
+      case "720p": width = 1280; height = 720; break;
+      case "1080p": width = 1920; height = 1080; break;
+      case "4K": width = 3840; height = 2160; break;
+    }
+
+    // Determine fps based on quality (bitrate as proxy)
+    if (bitrate >= 8000) fps = 24;
+    else if (bitrate >= 4000) fps = 15;
+    else if (bitrate >= 2000) fps = 12;
+    else fps = 10;
+
+    // GIF rough estimation: ~0.015 bytes per pixel per frame (varies wildly based on content)
+    // This is a rough average - actual size depends heavily on color complexity
+    const bytesPerPixelPerFrame = 0.012;
+    const totalFrames = duration * fps;
+    const pixelsPerFrame = width * height;
+    return Math.floor(totalFrames * pixelsPerFrame * bytesPerPixelPerFrame);
+  }
+
+  // Standard video estimation
   const videoBits = bitrate * 1000 * duration;
   const audioBits = hasAudio ? 128 * 1000 * duration : 0; // assume 128kbps audio
   return Math.floor((videoBits + audioBits) / 8);

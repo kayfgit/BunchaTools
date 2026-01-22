@@ -696,40 +696,11 @@ function App() {
   };
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      if (showVideoConverter) {
-        setShowVideoConverter(false);
-        setVideoFile(null);
-        setVideoFormat("mp4");
-        setVideoQuality("high");
-        setVideoAdvancedSettings({
-          resolution: "Keep Original",
-          frameRate: "Keep Original",
-          codec: "H.264",
-          keepAudio: true,
-        });
-        setShowVideoAdvanced(false);
-        setVideoConverting(false);
-        setVideoProgress(0);
-        setVideoConversionStatus('idle');
-      } else if (showPortKiller) {
-        setShowPortKiller(false);
-        setPortInput("");
-        setPortProcesses([]);
-        setScannedPort(null);
-      } else if (showTranslation) {
-        setShowTranslation(false);
-      } else if (showSettings) {
-        setShowSettings(false);
-      } else if (showQRGenerator) {
-        setShowQRGenerator(false);
-      } else if (showRegexTester) {
-        setShowRegexTester(false);
-      } else {
-        invoke("hide_window");
-        setQuery("");
-      }
-    } else if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
+    // Escape is handled by the global handler
+    if (e.key === "Escape") return;
+
+    // Handle navigation only in command palette mode
+    if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -865,34 +836,64 @@ function App() {
     }
   };
 
-  // Global escape key handler for panels without input focus
+  // Universal Escape key handler - works from any state
   useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (showSettings) {
-          setShowSettings(false);
-        }
+    const handleGlobalEscape = async (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+
+      // Don't handle if we're recording a hotkey (Escape cancels recording)
+      if (isRecordingHotkey) {
+        setIsRecordingHotkey(false);
+        return;
       }
-    };
 
-    if (showSettings) {
-      window.addEventListener("keydown", handleGlobalKeyDown);
-      return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-    }
-  }, [showSettings]);
-
-  // Color picker escape key and blur handler
-  useEffect(() => {
-    if (!showColorPicker) return;
-
-    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Close panels in order of priority (most specific first)
+      if (showVideoConverter) {
+        setShowVideoConverter(false);
+        setVideoFile(null);
+        setVideoFormat("mp4");
+        setVideoQuality("high");
+        setVideoAdvancedSettings({
+          resolution: "Keep Original",
+          frameRate: "Keep Original",
+          codec: "H.264",
+          keepAudio: true,
+        });
+        setShowVideoAdvanced(false);
+        setVideoConverting(false);
+        setVideoProgress(0);
+        setVideoConversionStatus('idle');
+      } else if (showPortKiller) {
+        setShowPortKiller(false);
+        setPortInput("");
+        setPortProcesses([]);
+        setScannedPort(null);
+      } else if (showTranslation) {
+        setShowTranslation(false);
+      } else if (showSettings) {
+        setShowSettings(false);
+      } else if (showColorPicker) {
         setShowColorPicker(false);
         setPickedColor(null);
         setCopiedFormat(null);
+      } else if (showQRGenerator) {
+        setShowQRGenerator(false);
+      } else if (showRegexTester) {
+        setShowRegexTester(false);
+      } else {
+        // No panel open - hide the window
         await invoke("hide_window");
+        setQuery("");
       }
     };
+
+    window.addEventListener("keydown", handleGlobalEscape);
+    return () => window.removeEventListener("keydown", handleGlobalEscape);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, isRecordingHotkey]);
+
+  // Color picker blur handler
+  useEffect(() => {
+    if (!showColorPicker) return;
 
     const handleBlur = () => {
       // Only reset state if not dragging (dragging causes temporary blur)
@@ -903,11 +904,9 @@ function App() {
       }
     };
 
-    window.addEventListener("keydown", handleGlobalKeyDown);
     window.addEventListener("blur", handleBlur);
 
     return () => {
-      window.removeEventListener("keydown", handleGlobalKeyDown);
       window.removeEventListener("blur", handleBlur);
     };
   }, [showColorPicker]);
@@ -1131,16 +1130,29 @@ function App() {
     setVideoProgress(0);
     setVideoConversionStatus('converting');
 
-    // Get bitrate from selected quality preset
+    // Get bitrate and resolution from selected quality preset
     const selectedPreset = VIDEO_QUALITY_PRESETS.find(p => p.id === videoQuality);
     const bitrate = selectedPreset?.bitrate || 0;
+
+    // Use quality preset resolution if Advanced Settings is "Keep Original" and preset has a specific resolution
+    let resolution = videoAdvancedSettings.resolution;
+    if (resolution === "Keep Original" && selectedPreset && selectedPreset.resolution !== "original") {
+      // Convert preset resolution format (e.g., "1920x1080" -> "1080p", "1280x720" -> "720p")
+      const resolutionMap: Record<string, string> = {
+        "3840x2160": "4K",
+        "1920x1080": "1080p",
+        "1280x720": "720p",
+        "854x480": "480p",
+      };
+      resolution = resolutionMap[selectedPreset.resolution] || "Keep Original";
+    }
 
     try {
       await invoke("convert_video", {
         inputPath: videoFile.path,
         outputPath,
         options: {
-          resolution: videoAdvancedSettings.resolution,
+          resolution,
           frame_rate: videoAdvancedSettings.frameRate,
           codec: videoAdvancedSettings.codec,
           keep_audio: videoAdvancedSettings.keepAudio,

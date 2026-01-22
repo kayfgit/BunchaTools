@@ -377,6 +377,7 @@ dependencies = [
  "dirs 5.0.1",
  "image",
  "log",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

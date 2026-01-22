@@ -7,18 +7,150 @@ use std::process::Command;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use windows::Win32::{
-    Foundation::POINT,
-    Graphics::Gdi::{GetDC, GetPixel, ReleaseDC},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Graphics::Gdi::{
+        GetDC, GetMonitorInfoW, GetPixel, MonitorFromPoint, ReleaseDC, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST,
+    },
     UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_C,
         VK_CONTROL,
     },
     UI::WindowsAndMessaging::{
-        CopyIcon, GetCursorPos, LoadCursorW, SetSystemCursor, SystemParametersInfoW, HCURSOR,
-        HICON, IDC_CROSS, IDC_IBEAM, OCR_NORMAL, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
+        CallNextHookEx, CopyIcon, GetCursorPos, GetWindowRect, LoadCursorW, SetSystemCursor,
+        SetWindowsHookExW, SystemParametersInfoW, HCURSOR, HICON,
+        IDC_CROSS, IDC_IBEAM, MSLLHOOKSTRUCT, OCR_NORMAL, SPI_SETCURSORS,
+        SYSTEM_PARAMETERS_INFO_ACTION, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
+
+// ============================================================================
+// Multi-Monitor Support
+// ============================================================================
+
+/// Get the work area (excluding taskbar) of the monitor where the cursor is located.
+/// Returns (x, y, width, height) of the work area.
+pub fn get_cursor_monitor_work_area() -> Option<(i32, i32, i32, i32)> {
+    unsafe {
+        let mut cursor_pos = POINT { x: 0, y: 0 };
+        if GetCursorPos(&mut cursor_pos).is_err() {
+            return None;
+        }
+
+        let monitor = MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_invalid() {
+            return None;
+        }
+
+        let mut monitor_info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            rcMonitor: RECT::default(),
+            rcWork: RECT::default(),
+            dwFlags: 0,
+        };
+
+        if GetMonitorInfoW(monitor, &mut monitor_info).as_bool() {
+            let work = monitor_info.rcWork;
+            Some((
+                work.left,
+                work.top,
+                work.right - work.left,
+                work.bottom - work.top,
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+/// Calculate the centered position for a window on the cursor's monitor.
+/// Returns (x, y) for the top-left corner of the window.
+pub fn get_centered_position_on_cursor_monitor(window_width: i32, window_height: i32) -> Option<(i32, i32)> {
+    let (work_x, work_y, work_width, work_height) = get_cursor_monitor_work_area()?;
+
+    let x = work_x + (work_width - window_width) / 2;
+    let y = work_y + (work_height - window_height) / 2;
+
+    Some((x, y))
+}
+
+// ============================================================================
+// Click-Outside-to-Close
+// ============================================================================
+
+// Global state for the mouse hook
+static MOUSE_HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static HOOK_ENABLED: AtomicBool = AtomicBool::new(false);
+static WINDOW_HWND: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+// Callback for when click outside is detected
+static mut CLICK_OUTSIDE_CALLBACK: Option<Box<dyn Fn() + Send + Sync>> = None;
+
+/// Low-level mouse hook procedure
+unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 && HOOK_ENABLED.load(Ordering::SeqCst) {
+        let msg = wparam.0 as u32;
+        // Check for left or right mouse button down
+        if msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN {
+            let hook_struct = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+            let click_point = hook_struct.pt;
+
+            // Get the window HWND
+            let hwnd_ptr = WINDOW_HWND.load(Ordering::SeqCst);
+            if !hwnd_ptr.is_null() {
+                let hwnd = HWND(hwnd_ptr as *mut std::ffi::c_void);
+                let mut rect = RECT::default();
+
+                if GetWindowRect(hwnd, &mut rect).is_ok() {
+                    // Check if click is outside the window
+                    if click_point.x < rect.left
+                        || click_point.x > rect.right
+                        || click_point.y < rect.top
+                        || click_point.y > rect.bottom
+                    {
+                        // Click is outside - trigger callback
+                        if let Some(ref callback) = CLICK_OUTSIDE_CALLBACK {
+                            callback();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
+/// Start the click-outside-to-close hook for the given window.
+/// The callback will be invoked when a click is detected outside the window.
+pub fn start_click_outside_hook<F>(hwnd: isize, callback: F)
+where
+    F: Fn() + Send + Sync + 'static,
+{
+    unsafe {
+        // Store the callback
+        CLICK_OUTSIDE_CALLBACK = Some(Box::new(callback));
+
+        // Store the window handle
+        WINDOW_HWND.store(hwnd as *mut std::ffi::c_void, Ordering::SeqCst);
+
+        // Only install hook if not already installed
+        if MOUSE_HOOK.load(Ordering::SeqCst).is_null() {
+            if let Ok(hook) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) {
+                MOUSE_HOOK.store(hook.0 as *mut std::ffi::c_void, Ordering::SeqCst);
+            }
+        }
+
+        HOOK_ENABLED.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Stop the click-outside-to-close hook.
+pub fn stop_click_outside_hook() {
+    HOOK_ENABLED.store(false, Ordering::SeqCst);
+}
 
 use winreg::enums::*;
 use winreg::RegKey;
@@ -393,39 +525,6 @@ pub fn get_ffmpeg_path() -> Result<std::path::PathBuf, String> {
 
     Err(format!(
         "FFmpeg not found. CWD: {:?}, Searched in: {:?}",
-        cwd, possible_paths
-    ))
-}
-
-pub fn get_ffprobe_path() -> Result<std::path::PathBuf, String> {
-    // Get executable directory
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("Failed to get exe directory")?
-        .to_path_buf();
-
-    // Get current working directory
-    let cwd = std::env::current_dir().unwrap_or_default();
-
-    let possible_paths = vec![
-        // Production paths
-        exe_dir.join("ffprobe.exe"),
-        exe_dir.join("binaries").join("ffprobe.exe"),
-        // Development paths (relative to cwd)
-        cwd.join("src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe"),
-        cwd.join("binaries/ffprobe-x86_64-pc-windows-msvc.exe"),
-    ];
-
-    for path in &possible_paths {
-        if path.exists() {
-            log::info!("Found FFprobe at: {:?}", path);
-            return Ok(path.clone());
-        }
-    }
-
-    Err(format!(
-        "FFprobe not found. CWD: {:?}, Searched in: {:?}",
         cwd, possible_paths
     ))
 }

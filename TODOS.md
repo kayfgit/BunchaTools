@@ -14,5 +14,8 @@
 [x] - Add Regex Tester tool
 [x] - Polish Regex Tester tool
 [x] - Add quick color converter in the command palette (oklch(0.6 0 0) to hex)
-[?] - Add compatibility to linux (Haven't tested yet)
-[] - Polish video converter 
+[x] - Add compatibility to linux (Works on some distros)
+[x] - Polish video converter 
+[] - Add the rest of the converters (Audio, Image and Documents)
+
+[] - Fix sizing of everything
