@@ -172,6 +172,14 @@ fn show_window(window: tauri::Window) {
     let _ = window.center();
     let _ = window.show();
     let _ = window.set_focus();
+
+    // Force foreground focus on Windows
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            platform::force_foreground_window(hwnd.0 as isize);
+        }
+    }
 }
 
 #[tauri::command]
@@ -1025,10 +1033,13 @@ fn toggle_window(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
 
-            // Start click-outside hook after showing
+            // Force foreground focus on Windows to ensure immediate keyboard capture
+            // This is critical for spotlight/command-palette UX where users start typing immediately
             #[cfg(target_os = "windows")]
             {
                 if let Ok(hwnd) = window.hwnd() {
+                    platform::force_foreground_window(hwnd.0 as isize);
+
                     let window_clone = window.clone();
                     platform::start_click_outside_hook(hwnd.0 as isize, move || {
                         let _ = window_clone.hide();

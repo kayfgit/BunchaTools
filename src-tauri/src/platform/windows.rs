@@ -16,13 +16,13 @@ use windows::Win32::{
     },
     UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_C,
-        VK_CONTROL,
+        VK_CONTROL, VK_MENU,
     },
     UI::WindowsAndMessaging::{
-        CallNextHookEx, CopyIcon, GetCursorPos, GetWindowRect, LoadCursorW, SetSystemCursor,
-        SetWindowsHookExW, SystemParametersInfoW, HCURSOR, HICON,
-        IDC_CROSS, IDC_IBEAM, MSLLHOOKSTRUCT, OCR_NORMAL, SPI_SETCURSORS,
-        SYSTEM_PARAMETERS_INFO_ACTION, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+        CallNextHookEx, CopyIcon, GetCursorPos, GetWindowRect, LoadCursorW, SetForegroundWindow,
+        SetSystemCursor, SetWindowsHookExW, SystemParametersInfoW, HCURSOR, HICON, IDC_CROSS,
+        IDC_IBEAM, MSLLHOOKSTRUCT, OCR_NORMAL, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
+        WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
 
@@ -74,6 +74,51 @@ pub fn get_centered_position_on_cursor_monitor(window_width: i32, window_height:
     let y = work_y + (work_height - window_height) / 2;
 
     Some((x, y))
+}
+
+// ============================================================================
+// Force Foreground Window Focus
+// ============================================================================
+
+/// Forcefully bring a window to the foreground and give it focus.
+/// This uses the ALT key press trick to bypass Windows' foreground lock.
+/// Windows allows SetForegroundWindow to succeed if the calling process
+/// received the last input event - sending a brief ALT press ensures this.
+/// This is necessary for spotlight/command-palette style apps that need to
+/// immediately capture keyboard input when activated via global hotkey.
+pub fn force_foreground_window(hwnd: isize) {
+    unsafe {
+        let hwnd = HWND(hwnd as *mut std::ffi::c_void);
+
+        // Send a brief ALT key press/release to allow SetForegroundWindow to work.
+        // This tricks Windows into thinking we have input focus permission.
+        let mut inputs: [INPUT; 2] = std::mem::zeroed();
+
+        // ALT key down
+        inputs[0].r#type = INPUT_KEYBOARD;
+        inputs[0].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_MENU,
+            wScan: 0,
+            dwFlags: Default::default(),
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // ALT key up
+        inputs[1].r#type = INPUT_KEYBOARD;
+        inputs[1].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_MENU,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+
+        // Now SetForegroundWindow should succeed
+        let _ = SetForegroundWindow(hwnd);
+    }
 }
 
 // ============================================================================
