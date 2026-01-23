@@ -11,11 +11,13 @@ use x11rb::protocol::xproto::{ConnectionExt, EventMask, GrabMode, GrabStatus, Im
 use x11rb::protocol::xtest::ConnectionExt as XTestConnectionExt;
 use x11rb::rust_connection::RustConnection;
 
+// Note: EventMask, GrabMode, GrabStatus are still used by pick_color_impl
+
 // ============================================================================
 // Color Picker (X11)
 // ============================================================================
 
-pub async fn pick_color_impl(window: tauri::Window) -> Result<String, String> {
+pub async fn pick_color_impl(window: tauri::WebviewWindow) -> Result<String, String> {
     let _ = window.hide();
     std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -154,161 +156,53 @@ fn pick_color_x11() -> Result<String, String> {
 // Text Selection (X11 + XTest)
 // ============================================================================
 
-pub async fn start_text_selection_impl(window: tauri::Window) -> Result<(), String> {
+pub async fn start_text_selection_impl(window: tauri::WebviewWindow) -> Result<(), String> {
     let _ = window.hide();
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    // Run in a blocking thread
-    let result = tokio::task::spawn_blocking(|| text_selection_x11())
+    // Copy the already-selected text using Ctrl+C
+    let result = tokio::task::spawn_blocking(|| copy_selected_text_x11())
         .await
         .map_err(|e| format!("Task join error: {}", e))?;
 
-    if result.is_ok() {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    // Wait for clipboard to be populated
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let _ = window.show();
+    let _ = window.set_focus();
 
     result
 }
 
-fn text_selection_x11() -> Result<(), String> {
-    let (conn, screen_num) = RustConnection::connect(None).map_err(|e| format!("X11 connection failed: {}. Note: This feature requires X11 (not Wayland).", e))?;
+/// Copy the currently selected text to clipboard by simulating Ctrl+C (X11)
+fn copy_selected_text_x11() -> Result<(), String> {
+    let (conn, screen_num) = RustConnection::connect(None)
+        .map_err(|e| format!("X11 connection failed: {}. Note: This feature requires X11 (not Wayland).", e))?;
 
     let screen = &conn.setup().roots[screen_num];
     let root = screen.root;
 
-    // Create I-beam cursor
-    let cursor_font = conn
-        .generate_id()
-        .map_err(|e| format!("Failed to generate font id: {}", e))?;
-    conn.open_font(cursor_font, b"cursor")
-        .map_err(|e| format!("Failed to open cursor font: {}", e))?;
+    // Simulate Ctrl+C using XTest
+    // Key codes: Control_L is usually 37, C is usually 54
+    let control_keycode = 37u8;
+    let c_keycode = 54u8;
 
-    let cursor = conn
-        .generate_id()
-        .map_err(|e| format!("Failed to generate cursor id: {}", e))?;
+    // Press Control
+    let _ = conn.xtest_fake_input(2, control_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
+    let _ = conn.flush();
 
-    // I-beam/xterm cursor is character 152 in the cursor font
-    conn.create_glyph_cursor(
-        cursor,
-        cursor_font,
-        cursor_font,
-        152,
-        153, // xterm/ibeam glyph
-        0,
-        0,
-        0,       // foreground (black)
-        65535,
-        65535,
-        65535, // background (white)
-    )
-    .map_err(|e| format!("Failed to create cursor: {}", e))?;
+    // Press C
+    let _ = conn.xtest_fake_input(2, c_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
+    let _ = conn.flush();
 
-    // Grab pointer with I-beam cursor
-    let grab_result = conn
-        .grab_pointer(
-            true,
-            root,
-            (EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE | EventMask::KEY_PRESS).into(),
-            GrabMode::ASYNC,
-            GrabMode::ASYNC,
-            root,
-            cursor,
-            x11rb::CURRENT_TIME,
-        )
-        .map_err(|e| format!("Grab pointer request failed: {}", e))?
-        .reply()
-        .map_err(|e| format!("Grab pointer reply failed: {}", e))?;
+    std::thread::sleep(std::time::Duration::from_millis(50));
 
-    if grab_result.status != GrabStatus::SUCCESS {
-        return Err("Failed to grab pointer".to_string());
-    }
+    // Release C
+    let _ = conn.xtest_fake_input(3, c_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
+    let _ = conn.flush();
 
-    // Also grab keyboard for Escape key
-    let _ = conn.grab_keyboard(
-        true,
-        root,
-        x11rb::CURRENT_TIME,
-        GrabMode::ASYNC,
-        GrabMode::ASYNC,
-    );
-
-    let mut cancelled = false;
-    let mut button_pressed = false;
-
-    // Wait for button press (start selection)
-    loop {
-        let event = conn
-            .wait_for_event()
-            .map_err(|e| format!("Event error: {}", e))?;
-
-        match event {
-            x11rb::protocol::Event::ButtonPress(bp) => {
-                if bp.detail == 1 {
-                    button_pressed = true;
-                    // Release pointer grab but keep monitoring
-                    let _ = conn.ungrab_pointer(x11rb::CURRENT_TIME);
-                    let _ = conn.flush();
-
-                    // Simulate the button press at the current location using XTest
-                    let _ = conn.xtest_fake_input(4, 1, x11rb::CURRENT_TIME, root, 0, 0, 0);
-                    let _ = conn.flush();
-                    break;
-                }
-            }
-            x11rb::protocol::Event::KeyPress(kp) => {
-                if kp.detail == 9 {
-                    // Escape
-                    cancelled = true;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if cancelled {
-        let _ = conn.ungrab_pointer(x11rb::CURRENT_TIME);
-        let _ = conn.ungrab_keyboard(x11rb::CURRENT_TIME);
-        let _ = conn.free_cursor(cursor);
-        let _ = conn.close_font(cursor_font);
-        let _ = conn.flush();
-        return Err("Cancelled".to_string());
-    }
-
-    if button_pressed {
-        // Wait a bit for user to complete selection
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        // Now simulate Ctrl+C using XTest
-        // Key codes: Control_L is usually 37, C is usually 54
-        let control_keycode = 37u8;
-        let c_keycode = 54u8;
-
-        // Press Control
-        let _ = conn.xtest_fake_input(2, control_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
-        let _ = conn.flush();
-
-        // Press C
-        let _ = conn.xtest_fake_input(2, c_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
-        let _ = conn.flush();
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        // Release C
-        let _ = conn.xtest_fake_input(3, c_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
-        let _ = conn.flush();
-
-        // Release Control
-        let _ = conn.xtest_fake_input(3, control_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
-        let _ = conn.flush();
-    }
-
-    // Cleanup
-    let _ = conn.ungrab_keyboard(x11rb::CURRENT_TIME);
-    let _ = conn.free_cursor(cursor);
-    let _ = conn.close_font(cursor_font);
+    // Release Control
+    let _ = conn.xtest_fake_input(3, control_keycode, x11rb::CURRENT_TIME, root, 0, 0, 0);
     let _ = conn.flush();
 
     Ok(())

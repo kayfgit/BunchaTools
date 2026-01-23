@@ -76,10 +76,15 @@ function App() {
     show_in_tray: true,
     automatic_updates: false,
     theme: "dark",
+    quick_translation_hotkey_modifiers: ["Ctrl", "Alt"],
+    quick_translation_hotkey_key: "",
+    quick_translation_target_language: "en",
   });
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
+  const [isRecordingQuickTranslationHotkey, setIsRecordingQuickTranslationHotkey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLDivElement>(null);
+  const quickTranslationHotkeyInputRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const isDialogOpenRef = useRef(false);
   const settingsInitialized = useRef(false);
@@ -219,56 +224,20 @@ function App() {
     {
       id: "quick-translation",
       name: "Quick Translate",
-      description: "Instant translation of highlighted text",
+      description: "Translate text between languages",
       icon: Languages,
       keywords: ["translate", "translation", "language", "japanese", "english", "spanish", "french", "german", "chinese", "korean"],
       action: async () => {
+        await invoke("set_auto_hide", { enabled: true });
         setQuery("");
         // Reset translation state
         setTranslationInput("");
         setTranslationOutput("");
-        setDetectedLanguage("Detecting...");
+        setDetectedLanguage("");
         setTranslationError(null);
         setIsTranslating(false);
-
-        try {
-          // Start text selection mode - window hides, cursor changes to I-beam
-          // User selects text, Ctrl+C is simulated, window shows after mouse release
-          await invoke("start_text_selection");
-
-          // Read the copied text from clipboard
-          const clipboardText = await readText();
-
-          if (clipboardText && clipboardText.trim()) {
-            setTranslationInput(clipboardText);
-            setShowTranslation(true);
-
-            // Start translation immediately
-            setIsTranslating(true);
-            try {
-              const result = await invoke<TranslationResult>("translate_text", {
-                text: clipboardText,
-                targetLang: targetLanguage,
-              });
-              setTranslationOutput(result.translated_text);
-              setDetectedLanguage(result.detected_language);
-              setIsTranslating(false);
-            } catch (translationErr) {
-              setTranslationError(String(translationErr));
-              setIsTranslating(false);
-            }
-          } else {
-            // No text was selected/copied
-            setShowTranslation(true);
-            setTranslationInput("");
-            setDetectedLanguage("No text selected");
-          }
-        } catch (e) {
-          // User cancelled (pressed Escape), don't show translation window
-          if (e !== "Cancelled") {
-            console.error("Text selection error:", e);
-          }
-        }
+        // Just show the translation window for manual input
+        setShowTranslation(true);
       },
     },
     {
@@ -470,6 +439,69 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Listen for quick translation hotkey trigger
+  useEffect(() => {
+    const unlisten = listen("trigger-quick-translation", async () => {
+      // Reset translation state
+      setTranslationInput("");
+      setTranslationOutput("");
+      setDetectedLanguage("Detecting...");
+      setTranslationError(null);
+      setIsTranslating(false);
+      // Close any open panels first
+      setShowSettings(false);
+      setShowVideoConverter(false);
+      setShowPortKiller(false);
+      setShowColorPicker(false);
+      setShowQRGenerator(false);
+      setShowRegexTester(false);
+
+      try {
+        // Start text selection mode using the app handle version (works from hotkey context)
+        await invoke("start_text_selection_from_hotkey");
+
+        // Read the copied text from clipboard
+        const clipboardText = await readText();
+
+        if (clipboardText && clipboardText.trim()) {
+          setTranslationInput(clipboardText);
+          setShowTranslation(true);
+
+          // Start translation immediately using the saved target language
+          setIsTranslating(true);
+          try {
+            const result = await invoke<TranslationResult>("translate_text", {
+              text: clipboardText,
+              targetLang: settings.quick_translation_target_language,
+            });
+            setTranslationOutput(result.translated_text);
+            setDetectedLanguage(result.detected_language);
+            setTargetLanguage(settings.quick_translation_target_language);
+            setIsTranslating(false);
+          } catch (translationErr) {
+            setTranslationError(String(translationErr));
+            setIsTranslating(false);
+          }
+        } else {
+          // No text was selected/copied
+          setShowTranslation(true);
+          setTranslationInput("");
+          setDetectedLanguage("No text selected");
+          setTargetLanguage(settings.quick_translation_target_language);
+        }
+      } catch (e) {
+        // User cancelled (pressed Escape), don't show translation window
+        if (e !== "Cancelled") {
+          console.error("Text selection error:", e);
+        }
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [settings.quick_translation_target_language]);
 
   useEffect(() => {
     if (query.trim() === "") {
@@ -835,6 +867,113 @@ function App() {
     }
   };
 
+  // Quick Translation hotkey recording handler
+  const handleQuickTranslationHotkeyKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === "Escape") {
+      setIsRecordingQuickTranslationHotkey(false);
+      return;
+    }
+
+    const modifiers: string[] = [];
+    if (e.altKey) modifiers.push("Alt");
+    if (e.ctrlKey) modifiers.push("Ctrl");
+    if (e.shiftKey) modifiers.push("Shift");
+    if (e.metaKey) modifiers.push("Win");
+
+    const code = e.code;
+    let mappedKey = "";
+
+    if (code.startsWith("Key")) {
+      mappedKey = code.substring(3);
+    } else if (code.startsWith("Digit")) {
+      mappedKey = code.substring(5);
+    } else if (code.startsWith("Numpad") && code.length > 6) {
+      const numpadPart = code.substring(6);
+      if (/^\d$/.test(numpadPart)) {
+        mappedKey = "Num" + numpadPart;
+      } else {
+        mappedKey = "Num" + numpadPart;
+      }
+    } else if (/^F\d{1,2}$/.test(code)) {
+      mappedKey = code;
+    } else {
+      const specialKeys: Record<string, string> = {
+        Space: "Space",
+        Enter: "Enter",
+        Tab: "Tab",
+        Backspace: "Backspace",
+        Delete: "Delete",
+        Insert: "Insert",
+        Home: "Home",
+        End: "End",
+        PageUp: "PageUp",
+        PageDown: "PageDown",
+        ArrowUp: "Up",
+        ArrowDown: "Down",
+        ArrowLeft: "Left",
+        ArrowRight: "Right",
+        Backquote: "`",
+        Minus: "-",
+        Equal: "=",
+        BracketLeft: "[",
+        BracketRight: "]",
+        Backslash: "\\",
+        Semicolon: ";",
+        Quote: "'",
+        Comma: ",",
+        Period: ".",
+        Slash: "/",
+      };
+      mappedKey = specialKeys[code] || "";
+    }
+
+    if (!mappedKey || ["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"].includes(code)) {
+      return;
+    }
+
+    const isFunctionKey = /^F\d{1,2}$/.test(mappedKey);
+    if (modifiers.length > 0 || isFunctionKey) {
+      setSettings((prev) => ({
+        ...prev,
+        quick_translation_hotkey_modifiers: modifiers,
+        quick_translation_hotkey_key: mappedKey,
+      }));
+      setIsRecordingQuickTranslationHotkey(false);
+    }
+  };
+
+  // Quick Translation hotkey mouse button handler
+  const handleQuickTranslationHotkeyMouseDown = (e: React.MouseEvent) => {
+    if (e.button < 3) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const modifiers: string[] = [];
+    if (e.altKey) modifiers.push("Alt");
+    if (e.ctrlKey) modifiers.push("Ctrl");
+    if (e.shiftKey) modifiers.push("Shift");
+    if (e.metaKey) modifiers.push("Win");
+
+    const mouseButtonNames: Record<number, string> = {
+      3: "Mouse4",
+      4: "Mouse5",
+    };
+
+    const buttonName = mouseButtonNames[e.button];
+    if (buttonName) {
+      setSettings((prev) => ({
+        ...prev,
+        quick_translation_hotkey_modifiers: modifiers,
+        quick_translation_hotkey_key: buttonName,
+      }));
+      setIsRecordingQuickTranslationHotkey(false);
+    }
+  };
+
   // Universal Escape key handler - works from any state
   useEffect(() => {
     const handleGlobalEscape = async (e: KeyboardEvent) => {
@@ -843,6 +982,10 @@ function App() {
       // Don't handle if we're recording a hotkey (Escape cancels recording)
       if (isRecordingHotkey) {
         setIsRecordingHotkey(false);
+        return;
+      }
+      if (isRecordingQuickTranslationHotkey) {
+        setIsRecordingQuickTranslationHotkey(false);
         return;
       }
 
@@ -888,7 +1031,7 @@ function App() {
 
     window.addEventListener("keydown", handleGlobalEscape);
     return () => window.removeEventListener("keydown", handleGlobalEscape);
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, isRecordingHotkey]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
 
   // Color picker blur handler
   useEffect(() => {
@@ -1296,12 +1439,28 @@ function App() {
           translationOutput={translationOutput}
           detectedLanguage={detectedLanguage}
           targetLanguage={targetLanguage}
-          setTargetLanguage={setTargetLanguage}
+          setTargetLanguage={(lang) => {
+            setTargetLanguage(lang);
+            setSettings((prev) => ({ ...prev, quick_translation_target_language: lang }));
+          }}
           isTranslating={isTranslating}
           translationError={translationError}
           isSettingsOpen={isTranslationSettingsOpen}
           setIsSettingsOpen={setIsTranslationSettingsOpen}
           onDragStart={handleDragStart}
+          hotkeyModifiers={settings.quick_translation_hotkey_modifiers}
+          hotkeyKey={settings.quick_translation_hotkey_key}
+          isRecordingHotkey={isRecordingQuickTranslationHotkey}
+          setIsRecordingHotkey={setIsRecordingQuickTranslationHotkey}
+          hotkeyInputRef={quickTranslationHotkeyInputRef}
+          onHotkeyKeyDown={handleQuickTranslationHotkeyKeyDown}
+          onHotkeyMouseDown={handleQuickTranslationHotkeyMouseDown}
+          onClearHotkey={() => {
+            setSettings((prev) => ({
+              ...prev,
+              quick_translation_hotkey_key: "",
+            }));
+          }}
         />
       )}
 

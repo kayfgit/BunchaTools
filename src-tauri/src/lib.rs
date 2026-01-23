@@ -36,10 +36,25 @@ pub struct Settings {
     pub window_position: Option<(i32, i32)>, // Saved window position (x, y)
     #[serde(default = "default_show_in_tray")]
     pub show_in_tray: bool,
+    // Quick Translation settings
+    #[serde(default = "default_quick_translation_modifiers")]
+    pub quick_translation_hotkey_modifiers: Vec<String>,
+    #[serde(default)]
+    pub quick_translation_hotkey_key: String, // Empty string means disabled
+    #[serde(default = "default_quick_translation_target_language")]
+    pub quick_translation_target_language: String,
 }
 
 fn default_show_in_tray() -> bool {
     true
+}
+
+fn default_quick_translation_modifiers() -> Vec<String> {
+    vec!["Ctrl".to_string(), "Alt".to_string()]
+}
+
+fn default_quick_translation_target_language() -> String {
+    "en".to_string()
 }
 
 impl Default for Settings {
@@ -50,6 +65,9 @@ impl Default for Settings {
             launch_at_startup: false,
             window_position: None,
             show_in_tray: true,
+            quick_translation_hotkey_modifiers: default_quick_translation_modifiers(),
+            quick_translation_hotkey_key: String::new(), // Disabled by default
+            quick_translation_target_language: default_quick_translation_target_language(),
         }
     }
 }
@@ -57,6 +75,7 @@ impl Default for Settings {
 // Global state for current shortcut
 struct AppState {
     current_shortcut: Mutex<Option<Shortcut>>,
+    quick_translation_shortcut: Mutex<Option<Shortcut>>,
     settings: Mutex<Settings>,
     auto_hide_enabled: Mutex<bool>,
     is_dragging: Mutex<bool>,
@@ -218,17 +237,35 @@ fn get_launch_at_startup() -> Result<bool, String> {
 fn update_global_shortcut(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     let state = app.state::<AppState>();
 
-    // Unregister old shortcut
+    // Unregister old main shortcut
     if let Some(old_shortcut) = state.current_shortcut.lock().unwrap().take() {
         let _ = app.global_shortcut().unregister(old_shortcut);
     }
 
-    // Register new shortcut
+    // Unregister old quick translation shortcut
+    if let Some(old_shortcut) = state.quick_translation_shortcut.lock().unwrap().take() {
+        let _ = app.global_shortcut().unregister(old_shortcut);
+    }
+
+    // Register new main shortcut
     if let Some(new_shortcut) = parse_shortcut(&settings.hotkey_modifiers, &settings.hotkey_key) {
         app.global_shortcut()
             .register(new_shortcut.clone())
             .map_err(|e| e.to_string())?;
         *state.current_shortcut.lock().unwrap() = Some(new_shortcut);
+    }
+
+    // Register new quick translation shortcut (only if key is set)
+    if !settings.quick_translation_hotkey_key.is_empty() {
+        if let Some(new_shortcut) = parse_shortcut(
+            &settings.quick_translation_hotkey_modifiers,
+            &settings.quick_translation_hotkey_key,
+        ) {
+            app.global_shortcut()
+                .register(new_shortcut.clone())
+                .map_err(|e| e.to_string())?;
+            *state.quick_translation_shortcut.lock().unwrap() = Some(new_shortcut);
+        }
     }
 
     Ok(())
@@ -378,7 +415,7 @@ async fn convert_media(
 }
 
 #[tauri::command]
-async fn pick_color(window: tauri::Window) -> Result<String, String> {
+async fn pick_color(window: tauri::WebviewWindow) -> Result<String, String> {
     platform::pick_color_impl(window).await
 }
 
@@ -467,7 +504,17 @@ async fn convert_currency(amount: f64, from: String, to: String) -> Result<Curre
 }
 
 #[tauri::command]
-async fn start_text_selection(window: tauri::Window) -> Result<(), String> {
+async fn start_text_selection(window: tauri::WebviewWindow) -> Result<(), String> {
+    platform::start_text_selection_impl(window).await
+}
+
+/// Start text selection using the app handle (for use when triggered from global hotkey)
+#[tauri::command]
+async fn start_text_selection_from_hotkey(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Failed to get main window")?;
+
     platform::start_text_selection_impl(window).await
 }
 
@@ -1071,6 +1118,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             current_shortcut: Mutex::new(None),
+            quick_translation_shortcut: Mutex::new(None),
             settings: Mutex::new(Settings::default()),
             auto_hide_enabled: Mutex::new(true),
             is_dragging: Mutex::new(false),
@@ -1147,8 +1195,9 @@ pub fn run() {
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |_app, shortcut, event| {
                         if event.state() == ShortcutState::Pressed {
-                            // Check current state shortcut
                             let state = _app.state::<AppState>();
+
+                            // Check for main window toggle shortcut
                             let current_shortcut = state.current_shortcut.lock().unwrap().clone();
                             if let Some(current) = current_shortcut {
                                 if shortcut == &current {
@@ -1158,6 +1207,18 @@ pub fn run() {
                                     tauri::async_runtime::spawn(async move {
                                         toggle_window(&app_handle_clone);
                                     });
+                                    return;
+                                }
+                            }
+
+                            // Check for quick translation shortcut
+                            let quick_translation_shortcut = state.quick_translation_shortcut.lock().unwrap().clone();
+                            if let Some(qt_shortcut) = quick_translation_shortcut {
+                                if shortcut == &qt_shortcut {
+                                    let app_handle_clone = app_handle.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        let _ = app_handle_clone.emit("trigger-quick-translation", ());
+                                    });
                                 }
                             }
                         }
@@ -1165,13 +1226,25 @@ pub fn run() {
                     .build(),
             )?;
 
-            // Register the initial shortcut
+            // Register the initial main shortcut
             if let Some(shortcut) =
                 parse_shortcut(&settings.hotkey_modifiers, &settings.hotkey_key)
             {
                 app.global_shortcut().register(shortcut.clone())?;
                 let state = app.state::<AppState>();
                 *state.current_shortcut.lock().unwrap() = Some(shortcut);
+            }
+
+            // Register the initial quick translation shortcut (if set)
+            if !settings.quick_translation_hotkey_key.is_empty() {
+                if let Some(shortcut) = parse_shortcut(
+                    &settings.quick_translation_hotkey_modifiers,
+                    &settings.quick_translation_hotkey_key,
+                ) {
+                    app.global_shortcut().register(shortcut.clone())?;
+                    let state = app.state::<AppState>();
+                    *state.quick_translation_shortcut.lock().unwrap() = Some(shortcut);
+                }
             }
 
             // Handle window events - use if let to avoid panic if window isn't ready
@@ -1212,6 +1285,7 @@ pub fn run() {
             kill_port_process,
             convert_currency,
             start_text_selection,
+            start_text_selection_from_hotkey,
             translate_text,
             save_binary_file,
             save_text_file,

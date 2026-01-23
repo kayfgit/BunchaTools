@@ -19,7 +19,7 @@ use windows::Win32::{
     },
     UI::WindowsAndMessaging::{
         CopyIcon, GetCursorPos, LoadCursorW, SetForegroundWindow, SetSystemCursor,
-        SystemParametersInfoW, HCURSOR, HICON, IDC_CROSS, IDC_IBEAM, OCR_NORMAL, SPI_SETCURSORS,
+        SystemParametersInfoW, HCURSOR, HICON, IDC_CROSS, OCR_NORMAL, SPI_SETCURSORS,
         SYSTEM_PARAMETERS_INFO_ACTION,
     },
 };
@@ -126,7 +126,7 @@ use winreg::RegKey;
 // Color Picker
 // ============================================================================
 
-pub async fn pick_color_impl(window: tauri::Window) -> Result<String, String> {
+pub async fn pick_color_impl(window: tauri::WebviewWindow) -> Result<String, String> {
     let _ = window.hide();
     std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -195,77 +195,99 @@ pub async fn pick_color_impl(window: tauri::Window) -> Result<String, String> {
 // Text Selection
 // ============================================================================
 
-pub async fn start_text_selection_impl(window: tauri::Window) -> Result<(), String> {
+pub async fn start_text_selection_impl(window: tauri::WebviewWindow) -> Result<(), String> {
     // Hide the window first
     let _ = window.hide();
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    // Set the cursor to I-beam (text selection cursor)
+    // Simulate Ctrl+C to copy the already-selected text
+    copy_selected_text();
+
+    // Wait for clipboard to be populated
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Show the window
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    Ok(())
+}
+
+/// Copy the currently selected text to clipboard by simulating Ctrl+C
+/// First releases any held modifier keys to avoid sending Ctrl+Shift+C etc.
+pub fn copy_selected_text() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LCONTROL, VK_RCONTROL, VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU};
+
     unsafe {
-        let ibeam_cursor = LoadCursorW(None, IDC_IBEAM).map_err(|e| e.to_string())?;
-        let cursor_copy = CopyIcon(HICON(ibeam_cursor.0)).map_err(|e| e.to_string())?;
-        let _ = SetSystemCursor(HCURSOR(cursor_copy.0), OCR_NORMAL);
-    }
+        // First, release any modifier keys that might be held down from the hotkey
+        let mut release_inputs: [INPUT; 6] = std::mem::zeroed();
 
-    let restore_cursors = || unsafe {
-        let _ = SystemParametersInfoW(
-            SYSTEM_PARAMETERS_INFO_ACTION(SPI_SETCURSORS.0),
-            0,
-            None,
-            Default::default(),
-        );
-    };
+        // Release Left Ctrl
+        release_inputs[0].r#type = INPUT_KEYBOARD;
+        release_inputs[0].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_LCONTROL,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-    const VK_LBUTTON: i32 = 0x01;
-    const VK_ESCAPE: i32 = 0x1B;
+        // Release Right Ctrl
+        release_inputs[1].r#type = INPUT_KEYBOARD;
+        release_inputs[1].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_RCONTROL,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-    // Wait for any existing mouse button press to be released first
-    loop {
-        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
-        if state >= 0 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+        // Release Left Shift
+        release_inputs[2].r#type = INPUT_KEYBOARD;
+        release_inputs[2].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_LSHIFT,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-    // Wait for mouse button to be pressed (user starts selecting)
-    loop {
-        let escape_state = unsafe { GetAsyncKeyState(VK_ESCAPE) };
-        if escape_state < 0 {
-            restore_cursors();
-            return Err("Cancelled".to_string());
-        }
+        // Release Right Shift
+        release_inputs[3].r#type = INPUT_KEYBOARD;
+        release_inputs[3].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_RSHIFT,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
-        if state < 0 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+        // Release Left Alt
+        release_inputs[4].r#type = INPUT_KEYBOARD;
+        release_inputs[4].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_LMENU,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-    // Wait for mouse button to be released (user finishes selecting)
-    loop {
-        let escape_state = unsafe { GetAsyncKeyState(VK_ESCAPE) };
-        if escape_state < 0 {
-            restore_cursors();
-            return Err("Cancelled".to_string());
-        }
+        // Release Right Alt
+        release_inputs[5].r#type = INPUT_KEYBOARD;
+        release_inputs[5].Anonymous.ki = KEYBDINPUT {
+            wVk: VK_RMENU,
+            wScan: 0,
+            dwFlags: KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
 
-        let state = unsafe { GetAsyncKeyState(VK_LBUTTON) };
-        if state >= 0 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+        SendInput(&release_inputs, std::mem::size_of::<INPUT>() as i32);
 
-    // Restore cursors
-    restore_cursors();
+        // Small delay to ensure modifiers are released
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Small delay to ensure selection is complete
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
-    // Simulate Ctrl+C to copy selected text
-    unsafe {
+        // Now send Ctrl+C
         let mut inputs: [INPUT; 4] = std::mem::zeroed();
 
         // Ctrl down
@@ -310,15 +332,6 @@ pub async fn start_text_selection_impl(window: tauri::Window) -> Result<(), Stri
 
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
     }
-
-    // Wait for clipboard to be populated
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // Show the window
-    let _ = window.show();
-    let _ = window.set_focus();
-
-    Ok(())
 }
 
 // ============================================================================

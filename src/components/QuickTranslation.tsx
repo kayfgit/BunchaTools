@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Languages,
   Settings as SettingsIcon,
@@ -6,6 +6,7 @@ import {
   Copy,
   Loader2,
   ArrowDown,
+  X,
 } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { LANGUAGE_NAMES } from "../constants";
@@ -22,6 +23,15 @@ interface QuickTranslationProps {
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
   onDragStart: (e: React.MouseEvent) => void;
+  // Hotkey settings props
+  hotkeyModifiers: string[];
+  hotkeyKey: string;
+  isRecordingHotkey: boolean;
+  setIsRecordingHotkey: (recording: boolean) => void;
+  hotkeyInputRef: React.RefObject<HTMLDivElement | null>;
+  onHotkeyKeyDown: (e: React.KeyboardEvent) => void;
+  onHotkeyMouseDown: (e: React.MouseEvent) => void;
+  onClearHotkey: () => void;
 }
 
 export function QuickTranslation({
@@ -36,15 +46,40 @@ export function QuickTranslation({
   isSettingsOpen,
   setIsSettingsOpen,
   onDragStart,
+  hotkeyModifiers,
+  hotkeyKey,
+  isRecordingHotkey,
+  setIsRecordingHotkey,
+  hotkeyInputRef,
+  onHotkeyKeyDown,
+  onHotkeyMouseDown,
+  onClearHotkey,
 }: QuickTranslationProps) {
+  // Focus the hotkey input when recording starts
+  useEffect(() => {
+    if (isRecordingHotkey && hotkeyInputRef.current) {
+      hotkeyInputRef.current.focus();
+    }
+  }, [isRecordingHotkey, hotkeyInputRef]);
+
+  // Format the hotkey display
+  const formatHotkey = () => {
+    if (!hotkeyKey) return "Not set";
+    const parts = [...hotkeyModifiers, hotkeyKey];
+    return parts.join(" + ");
+  };
   return (
     <div className="bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
       {/* Header */}
-      <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
+      <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-between" data-drag-region>
+        {/* Spacer to balance the settings button */}
+        <div className="w-8" />
+        {/* Centered title */}
         <div className="flex items-center gap-2 text-sm text-buncha-text-muted">
           <Languages className="w-4 h-4" />
           <span>Quick Translation</span>
         </div>
+        {/* Settings button on far right */}
         <button
           onClick={() => setIsSettingsOpen(!isSettingsOpen)}
           className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer"
@@ -55,7 +90,8 @@ export function QuickTranslation({
 
       {/* Settings Panel (conditionally shown) */}
       {isSettingsOpen && (
-        <div className="px-6 py-4 border-b border-buncha-border/50 bg-buncha-surface/20">
+        <div className="px-6 py-4 border-b border-buncha-border/50 bg-buncha-surface/20 space-y-4">
+          {/* Target Language */}
           <div>
             <label className="text-sm text-buncha-text-muted mb-2 block">Target language</label>
             <select
@@ -76,6 +112,45 @@ export function QuickTranslation({
               <option value="ar">Arabic</option>
             </select>
           </div>
+
+          {/* Quick Translation Hotkey */}
+          <div>
+            <label className="text-sm text-buncha-text-muted mb-2 block">Keyboard shortcut</label>
+            <p className="text-xs text-buncha-text-muted/70 mb-2">
+              Press this hotkey anywhere to instantly translate selected text
+            </p>
+            <div className="flex items-center gap-2">
+              <div
+                ref={hotkeyInputRef}
+                tabIndex={0}
+                onClick={() => setIsRecordingHotkey(true)}
+                onKeyDown={isRecordingHotkey ? onHotkeyKeyDown : undefined}
+                onMouseDown={isRecordingHotkey ? onHotkeyMouseDown : undefined}
+                className={`flex-1 bg-buncha-bg border rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${
+                  isRecordingHotkey
+                    ? "border-buncha-accent ring-1 ring-buncha-accent text-buncha-accent"
+                    : "border-buncha-border text-buncha-text hover:border-buncha-accent/50"
+                }`}
+              >
+                {isRecordingHotkey ? (
+                  <span className="animate-pulse">Press a key combination...</span>
+                ) : (
+                  <span className={hotkeyKey ? "" : "text-buncha-text-muted"}>
+                    {formatHotkey()}
+                  </span>
+                )}
+              </div>
+              {hotkeyKey && (
+                <button
+                  onClick={onClearHotkey}
+                  className="p-2 hover:bg-buncha-surface rounded-lg transition-colors text-buncha-text-muted hover:text-buncha-text cursor-pointer"
+                  title="Clear hotkey"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -85,7 +160,7 @@ export function QuickTranslation({
         <div className="mb-6">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-buncha-accent uppercase tracking-wider">
-              {detectedLanguage}
+              {detectedLanguage || "Source"}
             </span>
             <div className="flex items-center gap-1">
               <button className="p-1.5 hover:bg-buncha-surface rounded-lg transition-colors cursor-pointer group">
