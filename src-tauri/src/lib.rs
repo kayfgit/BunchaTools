@@ -61,6 +61,7 @@ struct AppState {
     auto_hide_enabled: Mutex<bool>,
     is_dragging: Mutex<bool>,
     tray_handle: Mutex<Option<TrayIcon>>,
+    app_ready: Mutex<bool>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -161,9 +162,6 @@ fn parse_shortcut(modifiers: &[String], key: &str) -> Option<Shortcut> {
 
 #[tauri::command]
 fn hide_window(window: tauri::Window) {
-    #[cfg(target_os = "windows")]
-    platform::stop_click_outside_hook();
-
     let _ = window.hide();
 }
 
@@ -248,6 +246,21 @@ fn set_dragging(app: AppHandle, dragging: bool) {
     *state.is_dragging.lock().unwrap() = dragging;
 }
 
+#[tauri::command]
+fn mark_app_ready(app: AppHandle) {
+    let state = app.state::<AppState>();
+    *state.app_ready.lock().unwrap() = true;
+
+    // Show tray icon now that app is ready (if enabled in settings)
+    let settings = state.settings.lock().unwrap();
+    if settings.show_in_tray {
+        if let Some(tray) = state.tray_handle.lock().unwrap().as_ref() {
+            let _ = tray.set_visible(true);
+        }
+    }
+
+    log::info!("App marked as ready");
+}
 
 // Helper to get media duration using ffmpeg
 fn get_media_duration(ffmpeg_path: &std::path::Path, input_path: &str) -> Option<f64> {
@@ -1000,12 +1013,14 @@ async fn convert_video(
 }
 
 fn toggle_window(app: &AppHandle) {
+    // Don't toggle until the app is fully initialized
+    let state = app.state::<AppState>();
+    if !*state.app_ready.lock().unwrap() {
+        return;
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
-            // Stop click-outside hook when hiding
-            #[cfg(target_os = "windows")]
-            platform::stop_click_outside_hook();
-
             let _ = window.hide();
         } else {
             // Position window on the monitor where the cursor is located
@@ -1039,12 +1054,6 @@ fn toggle_window(app: &AppHandle) {
             {
                 if let Ok(hwnd) = window.hwnd() {
                     platform::force_foreground_window(hwnd.0 as isize);
-
-                    let window_clone = window.clone();
-                    platform::start_click_outside_hook(hwnd.0 as isize, move || {
-                        let _ = window_clone.hide();
-                        platform::stop_click_outside_hook();
-                    });
                 }
             }
 
@@ -1066,6 +1075,7 @@ pub fn run() {
             auto_hide_enabled: Mutex::new(true),
             is_dragging: Mutex::new(false),
             tray_handle: Mutex::new(None),
+            app_ready: Mutex::new(false),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1124,10 +1134,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Store tray handle and set initial visibility based on settings
+            // Store tray handle - initially hidden until app is ready
             {
                 let state = app.state::<AppState>();
-                let _ = tray.set_visible(settings.show_in_tray);
+                let _ = tray.set_visible(false);
                 *state.tray_handle.lock().unwrap() = Some(tray);
             }
 
@@ -1168,12 +1178,6 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
 
-                // Force-initialize window by showing and immediately hiding.
-                // This ensures all Windows lazy-initialization is completed before
-                // any hotkey can trigger window operations, preventing deadlocks.
-                let _ = window.show();
-                let _ = window.hide();
-
                 let window_clone = window.clone();
                 let app_handle_for_blur = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -1183,9 +1187,6 @@ pub fn run() {
                         let is_dragging = *state.is_dragging.lock().unwrap();
                         // Don't hide if dragging or auto_hide is disabled
                         if auto_hide && !is_dragging {
-                            #[cfg(target_os = "windows")]
-                            platform::stop_click_outside_hook();
-
                             let _ = window_clone.hide();
                         }
                     }
@@ -1205,6 +1206,7 @@ pub fn run() {
             get_launch_at_startup,
             set_auto_hide,
             set_dragging,
+            mark_app_ready,
             convert_media,
             scan_port,
             kill_port_process,

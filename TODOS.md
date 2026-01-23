@@ -1,9 +1,9 @@
 [x] - Fix broken video converter on current release (After selecting file to be converted nothing happens)
-[] - Fix flickering in between transitions 
+[x] - Fix flickering in between transitions 
 [] - Fix icons (It's off center)
 [] - Remake the unit and currency converter to be smoother
 [x] - When using arrow keys in command palette, make list scroll down along with the selected tool
-[] - Fix stutter when dragging windows (Probably my shit pc)
+[x] - Fix stutter when dragging windows (Probably my shit pc)
 [x] - Fix portkiller tool not working at all on the installer
 [x] - Expand color details window to the right
 [x] - Center "Settings" text header on settings window
@@ -19,5 +19,5 @@
 [] - Add the rest of the converters (Audio, Image and Documents)
 [x] - Fix sizing of everything
 [x] - Fix stutter when opening app (Probably the animations)
-[] - Fix mouse lag when warming up 
-[] - Fix app not getting focused when opening up causing the first input to not happen
+[x] - Fix mouse lag when warming up 
+[x] - Fix app not getting focused when opening up causing the first input to not happen

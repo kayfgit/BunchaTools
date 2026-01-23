@@ -7,9 +7,8 @@ use std::process::Command;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::{
         GetDC, GetMonitorInfoW, GetPixel, MonitorFromPoint, ReleaseDC, MONITORINFO,
         MONITOR_DEFAULTTONEAREST,
@@ -19,10 +18,9 @@ use windows::Win32::{
         VK_CONTROL, VK_MENU,
     },
     UI::WindowsAndMessaging::{
-        CallNextHookEx, CopyIcon, GetCursorPos, GetWindowRect, LoadCursorW, SetForegroundWindow,
-        SetSystemCursor, SetWindowsHookExW, SystemParametersInfoW, HCURSOR, HICON, IDC_CROSS,
-        IDC_IBEAM, MSLLHOOKSTRUCT, OCR_NORMAL, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
-        WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+        CopyIcon, GetCursorPos, LoadCursorW, SetForegroundWindow, SetSystemCursor,
+        SystemParametersInfoW, HCURSOR, HICON, IDC_CROSS, IDC_IBEAM, OCR_NORMAL, SPI_SETCURSORS,
+        SYSTEM_PARAMETERS_INFO_ACTION,
     },
 };
 
@@ -119,82 +117,6 @@ pub fn force_foreground_window(hwnd: isize) {
         // Now SetForegroundWindow should succeed
         let _ = SetForegroundWindow(hwnd);
     }
-}
-
-// ============================================================================
-// Click-Outside-to-Close
-// ============================================================================
-
-// Global state for the mouse hook
-static MOUSE_HOOK: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-static HOOK_ENABLED: AtomicBool = AtomicBool::new(false);
-static WINDOW_HWND: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-
-// Callback for when click outside is detected
-static mut CLICK_OUTSIDE_CALLBACK: Option<Box<dyn Fn() + Send + Sync>> = None;
-
-/// Low-level mouse hook procedure
-unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code >= 0 && HOOK_ENABLED.load(Ordering::SeqCst) {
-        let msg = wparam.0 as u32;
-        // Check for left or right mouse button down
-        if msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN {
-            let hook_struct = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-            let click_point = hook_struct.pt;
-
-            // Get the window HWND
-            let hwnd_ptr = WINDOW_HWND.load(Ordering::SeqCst);
-            if !hwnd_ptr.is_null() {
-                let hwnd = HWND(hwnd_ptr as *mut std::ffi::c_void);
-                let mut rect = RECT::default();
-
-                if GetWindowRect(hwnd, &mut rect).is_ok() {
-                    // Check if click is outside the window
-                    if click_point.x < rect.left
-                        || click_point.x > rect.right
-                        || click_point.y < rect.top
-                        || click_point.y > rect.bottom
-                    {
-                        // Click is outside - trigger callback
-                        if let Some(ref callback) = CLICK_OUTSIDE_CALLBACK {
-                            callback();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    CallNextHookEx(None, code, wparam, lparam)
-}
-
-/// Start the click-outside-to-close hook for the given window.
-/// The callback will be invoked when a click is detected outside the window.
-pub fn start_click_outside_hook<F>(hwnd: isize, callback: F)
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    unsafe {
-        // Store the callback
-        CLICK_OUTSIDE_CALLBACK = Some(Box::new(callback));
-
-        // Store the window handle
-        WINDOW_HWND.store(hwnd as *mut std::ffi::c_void, Ordering::SeqCst);
-
-        // Only install hook if not already installed
-        if MOUSE_HOOK.load(Ordering::SeqCst).is_null() {
-            if let Ok(hook) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) {
-                MOUSE_HOOK.store(hook.0 as *mut std::ffi::c_void, Ordering::SeqCst);
-            }
-        }
-
-        HOOK_ENABLED.store(true, Ordering::SeqCst);
-    }
-}
-
-/// Stop the click-outside-to-close hook.
-pub fn stop_click_outside_hook() {
-    HOOK_ENABLED.store(false, Ordering::SeqCst);
 }
 
 use winreg::enums::*;

@@ -313,7 +313,7 @@ function App() {
     },
   ];
 
-  // Load settings on mount
+  // Load settings on mount and mark app as ready
   useEffect(() => {
     const initialize = async () => {
       try {
@@ -323,6 +323,8 @@ function App() {
         setTimeout(() => {
           settingsInitialized.current = true;
         }, 0);
+        // Signal to backend that the app is fully loaded and ready
+        await invoke("mark_app_ready");
       } catch (e) {
         console.error("Failed to initialize:", e);
       }
