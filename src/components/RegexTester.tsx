@@ -175,7 +175,7 @@ export function RegexTester({
   };
 
   return (
-    <div className="bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
+    <div className="w-[1000px] bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
       {/* Header */}
       <div className="bg-buncha-surface/30 border-b border-buncha-border/30 px-4 py-3 flex items-center" data-drag-region>
         <div className="flex-1 text-center">

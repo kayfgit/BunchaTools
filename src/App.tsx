@@ -713,7 +713,6 @@ function App() {
   const { contentRef } = useWindowAutoSize<HTMLDivElement>({
     config: windowSizeConfig,
     enabled: true,
-    animationDuration: 150,
   });
 
   const executeTool = async (tool: Tool) => {

@@ -46,7 +46,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="bg-buncha-bg rounded-lg overflow-hidden"
+      className="w-[680px] bg-buncha-bg rounded-lg overflow-hidden"
       onMouseDown={onDragStart}
     >
       {/* Search Input */}

@@ -22,3 +22,4 @@
 [x] - Fix mouse lag when warming up 
 [x] - Fix app not getting focused when opening up causing the first input to not happen
 [x] - Add shortcut for quick translation tool, allowing users to set up a hotkey, highlight text and instantly translate it
+[x] - Fix window sizing when moving between tools

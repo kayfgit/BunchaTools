@@ -24,7 +24,7 @@ export function SettingsPanel({
   onDragStart,
 }: SettingsPanelProps) {
   return (
-    <div className="bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
+    <div className="w-[680px] bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
       {/* Header */}
       <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-center" data-drag-region>
         <div className="flex items-center gap-2 text-sm text-buncha-text-muted">

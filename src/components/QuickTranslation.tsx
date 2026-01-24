@@ -69,7 +69,7 @@ export function QuickTranslation({
     return parts.join(" + ");
   };
   return (
-    <div className="bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
+    <div className="w-[680px] bg-buncha-bg rounded-lg overflow-hidden" onMouseDown={onDragStart}>
       {/* Header */}
       <div className="bg-buncha-surface/30 border-b border-buncha-border px-4 py-3 flex items-center justify-between" data-drag-region>
         {/* Spacer to balance the settings button */}
