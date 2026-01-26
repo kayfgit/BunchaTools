@@ -162,7 +162,7 @@ export interface GitDownloadOptions {
 }
 
 export interface GitDownloadProgress {
-  stage: 'idle' | 'fetching' | 'downloading' | 'extracting' | 'complete' | 'error';
+  stage: 'idle' | 'fetching' | 'listing' | 'downloading' | 'extracting' | 'complete' | 'error';
   percent: number;
   message: string;
   totalFiles?: number;

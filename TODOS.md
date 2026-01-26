@@ -24,4 +24,4 @@
 [x] - Add shortcut for quick translation tool, allowing users to set up a hotkey, highlight text and instantly translate it
 [x] - Fix window sizing when moving between tools
 [x] - Add git downloader tool
-[] - Make git downloader tool more efficient (Currently downloads full repository then extracts specific folder)
+[x] - Make git downloader tool more efficient (Currently downloads full repository then extracts specific folder)

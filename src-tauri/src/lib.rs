@@ -1093,48 +1093,261 @@ pub struct GitDownloadResult {
     pub output_path: String,
 }
 
-#[tauri::command]
-async fn download_github_folder(
-    app: AppHandle,
-    url_info: GitHubUrlInfo,
-    output_path: String,
-    options: GitDownloadOptions,
-) -> Result<GitDownloadResult, String> {
-    // Reset cancellation flag
-    {
-        let state = app.state::<AppState>();
-        *state.git_download_cancelled.lock().unwrap() = false;
+// GitHub Contents API response structure
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubContentItem {
+    #[allow(dead_code)]
+    name: String,
+    path: String,
+    #[serde(rename = "type")]
+    item_type: String, // "file" or "dir"
+    #[allow(dead_code)]
+    size: Option<u64>,
+    download_url: Option<String>,
+}
+
+// Struct to track files to download
+#[derive(Debug, Clone)]
+struct FileToDownload {
+    download_url: String,
+    relative_path: String,
+    #[allow(dead_code)]
+    size: u64,
+}
+
+/// List all files in a GitHub directory recursively using the Contents API
+async fn list_github_contents_recursive(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    branch: &str,
+    files: &mut Vec<FileToDownload>,
+) -> Result<(), String> {
+    let url = if path.is_empty() {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents?ref={}",
+            owner, repo, branch
+        )
+    } else {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
+            owner, repo, path, branch
+        )
+    };
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to list contents: {}", e))?;
+
+    // Check for rate limiting
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        let remaining = response
+            .headers()
+            .get("X-RateLimit-Remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+        if remaining == Some(0) {
+            return Err("GitHub API rate limit exceeded (60 requests/hour for unauthenticated). Please try again later.".to_string());
+        }
+        return Err("Access denied. This may be a private repository.".to_string());
     }
 
-    // Emit initial progress
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "fetching".to_string(),
-        percent: 0,
-        message: "Connecting to GitHub...".to_string(),
-        total_files: None,
-        processed_files: None,
-    });
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(format!("Path '{}' not found in repository", path));
+    }
 
+    if !response.status().is_success() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+
+    let contents: Vec<GitHubContentItem> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    for item in contents {
+        match item.item_type.as_str() {
+            "file" => {
+                if let Some(download_url) = item.download_url {
+                    files.push(FileToDownload {
+                        download_url,
+                        relative_path: item.path.clone(),
+                        size: item.size.unwrap_or(0),
+                    });
+                }
+            }
+            "dir" => {
+                // Recursively list subdirectory
+                Box::pin(list_github_contents_recursive(
+                    client, owner, repo, &item.path, branch, files,
+                ))
+                .await?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+/// Download files in parallel with progress reporting
+async fn download_files_parallel(
+    client: &reqwest::Client,
+    files: Vec<FileToDownload>,
+    base_path: &str,
+    output_dir: &PathBuf,
+    options: &GitDownloadOptions,
+    app: &AppHandle,
+) -> Result<(u32, u64), String> {
+    use futures_util::stream::{self, StreamExt};
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    let total_files = files.len() as u32;
+    let downloaded_count = Arc::new(AtomicU32::new(0));
+    let total_size = Arc::new(AtomicU64::new(0));
+
+    // Process files in parallel batches (8 concurrent downloads)
+    let concurrency = 8;
+
+    let results: Vec<Result<u64, String>> = stream::iter(files)
+        .map(|file| {
+            let client = client.clone();
+            let output_dir = output_dir.clone();
+            let base_path = base_path.to_string();
+            let downloaded_count = downloaded_count.clone();
+            let total_size = total_size.clone();
+            let app = app.clone();
+            let flatten = options.flatten_structure;
+
+            async move {
+                // Check for cancellation
+                {
+                    let state = app.state::<AppState>();
+                    if *state.git_download_cancelled.lock().unwrap() {
+                        return Err("Download cancelled".to_string());
+                    }
+                }
+
+                // Calculate output path
+                let relative_path = if base_path.is_empty() {
+                    file.relative_path.clone()
+                } else {
+                    file.relative_path
+                        .strip_prefix(&base_path)
+                        .map(|p| p.trim_start_matches('/').to_string())
+                        .unwrap_or(file.relative_path.clone())
+                };
+
+                let output_file_path = if flatten {
+                    let filename = relative_path.split('/').last().unwrap_or(&relative_path);
+                    output_dir.join(filename)
+                } else {
+                    output_dir.join(&relative_path)
+                };
+
+                // Create parent directories
+                if let Some(parent) = output_file_path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create directory: {}", e))?;
+                }
+
+                // Download the file
+                let response = client
+                    .get(&file.download_url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to download {}: {}", relative_path, e))?;
+
+                if !response.status().is_success() {
+                    return Err(format!(
+                        "Failed to download {}: HTTP {}",
+                        relative_path,
+                        response.status()
+                    ));
+                }
+
+                let bytes = response
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("Failed to read {}: {}", relative_path, e))?;
+
+                let size = bytes.len() as u64;
+
+                // Write to file
+                fs::write(&output_file_path, &bytes)
+                    .map_err(|e| format!("Failed to write {}: {}", relative_path, e))?;
+
+                // Update progress
+                let count = downloaded_count.fetch_add(1, Ordering::SeqCst) + 1;
+                total_size.fetch_add(size, Ordering::SeqCst);
+
+                // Emit progress (10-95%)
+                let percent = 10 + ((count as f64 / total_files as f64) * 85.0) as u32;
+                let _ = app.emit(
+                    "git-download-progress",
+                    GitDownloadProgress {
+                        stage: "downloading".to_string(),
+                        percent: percent.min(95),
+                        message: format!("Downloaded {} of {} files", count, total_files),
+                        total_files: Some(total_files),
+                        processed_files: Some(count),
+                    },
+                );
+
+                Ok(size)
+            }
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    // Check for errors
+    for result in &results {
+        if let Err(e) = result {
+            if e == "Download cancelled" {
+                return Err(e.clone());
+            }
+            // Log error but continue (partial success)
+            log::warn!("Download error: {}", e);
+        }
+    }
+
+    Ok((
+        downloaded_count.load(Ordering::SeqCst),
+        total_size.load(Ordering::SeqCst),
+    ))
+}
+
+/// Download using the zipball method (for full repos or fallback)
+async fn download_via_zipball(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    url_info: &GitHubUrlInfo,
+    output_path: &str,
+    options: &GitDownloadOptions,
+) -> Result<GitDownloadResult, String> {
     // Build the archive URL
     let archive_url = format!(
         "https://api.github.com/repos/{}/{}/zipball/{}",
         url_info.owner, url_info.repo, url_info.branch
     );
 
-    // Create HTTP client with User-Agent (required by GitHub API)
-    let client = reqwest::Client::builder()
-        .user_agent("BunchaTools/1.0")
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
     // Download the ZIP archive
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "downloading".to_string(),
-        percent: 10,
-        message: "Downloading repository archive...".to_string(),
-        total_files: None,
-        processed_files: None,
-    });
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "downloading".to_string(),
+            percent: 10,
+            message: "Downloading repository archive...".to_string(),
+            total_files: None,
+            processed_files: None,
+        },
+    );
 
     let response = client
         .get(&archive_url)
@@ -1153,29 +1366,20 @@ async fn download_github_folder(
     }
 
     // Create temp file for the ZIP
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    let temp_dir =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let temp_path = temp_dir.path().join("download.zip");
 
     // Stream download directly to file (memory efficient)
     use futures_util::StreamExt;
     use std::io::Write;
 
-    let mut file = std::fs::File::create(&temp_path)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    let mut file =
+        std::fs::File::create(&temp_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
 
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
     let mut last_progress_update = std::time::Instant::now();
-
-    // Emit initial download progress
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "downloading".to_string(),
-        percent: 15,
-        message: "Downloading repository...".to_string(),
-        total_files: None,
-        processed_files: None,
-    });
 
     while let Some(chunk_result) = stream.next().await {
         // Check for cancellation
@@ -1187,20 +1391,23 @@ async fn download_github_folder(
         }
 
         let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
-        file.write_all(&chunk).map_err(|e| format!("Write error: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
 
-        // Emit progress every 500ms to avoid flooding (progress is estimated 15-50%)
+        // Emit progress every 500ms
         if last_progress_update.elapsed().as_millis() > 500 {
-            // Estimate progress: cap at 50%, grow logarithmically based on size
             let estimated_progress = (15.0 + (downloaded as f64 / 1_000_000.0).min(35.0)) as u32;
-            let _ = app.emit("git-download-progress", GitDownloadProgress {
-                stage: "downloading".to_string(),
-                percent: estimated_progress.min(50),
-                message: format!("Downloading... {:.1} MB", downloaded as f64 / 1_000_000.0),
-                total_files: None,
-                processed_files: None,
-            });
+            let _ = app.emit(
+                "git-download-progress",
+                GitDownloadProgress {
+                    stage: "downloading".to_string(),
+                    percent: estimated_progress.min(50),
+                    message: format!("Downloading... {:.1} MB", downloaded as f64 / 1_000_000.0),
+                    total_files: None,
+                    processed_files: None,
+                },
+            );
             last_progress_update = std::time::Instant::now();
         }
     }
@@ -1208,30 +1415,35 @@ async fn download_github_folder(
     drop(file);
 
     // Emit download complete
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "downloading".to_string(),
-        percent: 50,
-        message: format!("Downloaded {:.1} MB", downloaded as f64 / 1_000_000.0),
-        total_files: None,
-        processed_files: None,
-    });
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "downloading".to_string(),
+            percent: 50,
+            message: format!("Downloaded {:.1} MB", downloaded as f64 / 1_000_000.0),
+            total_files: None,
+            processed_files: None,
+        },
+    );
 
     // Extract the ZIP
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "extracting".to_string(),
-        percent: 55,
-        message: "Extracting files...".to_string(),
-        total_files: None,
-        processed_files: None,
-    });
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "extracting".to_string(),
+            percent: 55,
+            message: "Extracting files...".to_string(),
+            total_files: None,
+            processed_files: None,
+        },
+    );
 
-    let zip_file = std::fs::File::open(&temp_path)
-        .map_err(|e| format!("Failed to open ZIP: {}", e))?;
-    let mut archive = zip::ZipArchive::new(zip_file)
-        .map_err(|e| format!("Failed to read ZIP: {}", e))?;
+    let zip_file =
+        std::fs::File::open(&temp_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(zip_file).map_err(|e| format!("Failed to read ZIP: {}", e))?;
 
     // GitHub's zipball has a root folder like "owner-repo-commitsha/"
-    // We need to find this prefix and strip it
     let root_prefix = if archive.len() > 0 {
         let first_entry = archive.by_index(0).map_err(|e| e.to_string())?;
         let first_name = first_entry.name();
@@ -1240,7 +1452,7 @@ async fn download_github_folder(
         return Err("Empty archive".to_string());
     };
 
-    // Build the path prefix to filter (root + user's path)
+    // Build the path prefix to filter
     let filter_prefix = if url_info.path.is_empty() {
         root_prefix.clone()
     } else {
@@ -1248,12 +1460,17 @@ async fn download_github_folder(
     };
 
     // Determine output directory
-    let base_output = PathBuf::from(&output_path);
+    let base_output = PathBuf::from(output_path);
     let final_output = if options.create_subfolder {
         let folder_name = if url_info.path.is_empty() {
             url_info.repo.clone()
         } else {
-            url_info.path.split('/').last().unwrap_or(&url_info.repo).to_string()
+            url_info
+                .path
+                .split('/')
+                .last()
+                .unwrap_or(&url_info.repo)
+                .to_string()
         };
         base_output.join(&folder_name)
     } else {
@@ -1275,23 +1492,29 @@ async fn download_github_folder(
     }
 
     if matching_files == 0 && !url_info.path.is_empty() {
-        return Err(format!("Folder '{}' not found in repository", url_info.path));
+        return Err(format!(
+            "Folder '{}' not found in repository",
+            url_info.path
+        ));
     }
 
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "extracting".to_string(),
-        percent: 60,
-        message: format!("Found {} files to extract...", matching_files),
-        total_files: Some(matching_files),
-        processed_files: Some(0),
-    });
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "extracting".to_string(),
+            percent: 60,
+            message: format!("Found {} files to extract...", matching_files),
+            total_files: Some(matching_files),
+            processed_files: Some(0),
+        },
+    );
 
     // Extract files
     let mut extracted_count: u32 = 0;
     let mut total_extracted_size: u64 = 0;
 
     for i in 0..archive.len() {
-        // Check for cancellation during extraction
+        // Check for cancellation
         {
             let state = app.state::<AppState>();
             if *state.git_download_cancelled.lock().unwrap() {
@@ -1302,35 +1525,30 @@ async fn download_github_folder(
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let entry_name = entry.name().to_string();
 
-        // Skip if not in the target path
         if !entry_name.starts_with(&filter_prefix) {
             continue;
         }
 
-        // Skip directories
         if entry.is_dir() {
             continue;
         }
 
-        // Calculate relative path
-        let relative_path = entry_name.strip_prefix(&filter_prefix).unwrap_or(&entry_name);
+        let relative_path = entry_name
+            .strip_prefix(&filter_prefix)
+            .unwrap_or(&entry_name);
 
-        // Determine output file path
         let output_file_path = if options.flatten_structure {
-            // Just the filename
             let filename = relative_path.split('/').last().unwrap_or(relative_path);
             final_output.join(filename)
         } else {
-            // Preserve directory structure
             final_output.join(relative_path)
         };
 
-        // Create parent directories
         if let Some(parent) = output_file_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
         }
 
-        // Extract file
         let mut outfile = fs::File::create(&output_file_path)
             .map_err(|e| format!("Failed to create file: {}", e))?;
         std::io::copy(&mut entry, &mut outfile)
@@ -1339,25 +1557,30 @@ async fn download_github_folder(
         total_extracted_size += entry.size();
         extracted_count += 1;
 
-        // Emit extraction progress (60-95%)
         let progress = 60 + ((extracted_count as f64 / matching_files.max(1) as f64) * 35.0) as u32;
-        let _ = app.emit("git-download-progress", GitDownloadProgress {
-            stage: "extracting".to_string(),
-            percent: progress.min(95),
-            message: format!("Extracting file {} of {}...", extracted_count, matching_files),
-            total_files: Some(matching_files),
-            processed_files: Some(extracted_count),
-        });
+        let _ = app.emit(
+            "git-download-progress",
+            GitDownloadProgress {
+                stage: "extracting".to_string(),
+                percent: progress.min(95),
+                message: format!("Extracting file {} of {}...", extracted_count, matching_files),
+                total_files: Some(matching_files),
+                processed_files: Some(extracted_count),
+            },
+        );
     }
 
     // Emit completion
-    let _ = app.emit("git-download-progress", GitDownloadProgress {
-        stage: "complete".to_string(),
-        percent: 100,
-        message: format!("Successfully downloaded {} files", extracted_count),
-        total_files: Some(matching_files),
-        processed_files: Some(extracted_count),
-    });
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "complete".to_string(),
+            percent: 100,
+            message: format!("Successfully downloaded {} files", extracted_count),
+            total_files: Some(matching_files),
+            processed_files: Some(extracted_count),
+        },
+    );
 
     Ok(GitDownloadResult {
         success: true,
@@ -1365,6 +1588,151 @@ async fn download_github_folder(
         total_size: total_extracted_size,
         output_path: final_output.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+async fn download_github_folder(
+    app: AppHandle,
+    url_info: GitHubUrlInfo,
+    output_path: String,
+    options: GitDownloadOptions,
+) -> Result<GitDownloadResult, String> {
+    // Reset cancellation flag
+    {
+        let state = app.state::<AppState>();
+        *state.git_download_cancelled.lock().unwrap() = false;
+    }
+
+    // Emit initial progress
+    let _ = app.emit(
+        "git-download-progress",
+        GitDownloadProgress {
+            stage: "fetching".to_string(),
+            percent: 0,
+            message: "Connecting to GitHub...".to_string(),
+            total_files: None,
+            processed_files: None,
+        },
+    );
+
+    // Create HTTP client with User-Agent (required by GitHub API)
+    let client = reqwest::Client::builder()
+        .user_agent("BunchaTools/1.0")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    // If a specific path is provided, use the efficient Contents API approach
+    // Otherwise, use zipball for full repository downloads (more efficient for full repos)
+    if !url_info.path.is_empty() {
+        // Use Contents API for folder-specific downloads
+        let _ = app.emit(
+            "git-download-progress",
+            GitDownloadProgress {
+                stage: "listing".to_string(),
+                percent: 5,
+                message: "Listing files in folder...".to_string(),
+                total_files: None,
+                processed_files: None,
+            },
+        );
+
+        // List all files in the target folder
+        let mut files: Vec<FileToDownload> = Vec::new();
+        match list_github_contents_recursive(
+            &client,
+            &url_info.owner,
+            &url_info.repo,
+            &url_info.path,
+            &url_info.branch,
+            &mut files,
+        )
+        .await
+        {
+            Ok(()) => {
+                if files.is_empty() {
+                    return Err(format!(
+                        "Folder '{}' is empty or not found",
+                        url_info.path
+                    ));
+                }
+
+                let total_files = files.len() as u32;
+                let _ = app.emit(
+                    "git-download-progress",
+                    GitDownloadProgress {
+                        stage: "downloading".to_string(),
+                        percent: 10,
+                        message: format!("Found {} files to download", total_files),
+                        total_files: Some(total_files),
+                        processed_files: Some(0),
+                    },
+                );
+
+                // Determine output directory
+                let base_output = PathBuf::from(&output_path);
+                let final_output = if options.create_subfolder {
+                    let folder_name = url_info
+                        .path
+                        .split('/')
+                        .last()
+                        .unwrap_or(&url_info.repo)
+                        .to_string();
+                    base_output.join(&folder_name)
+                } else {
+                    base_output
+                };
+
+                // Create output directory
+                fs::create_dir_all(&final_output)
+                    .map_err(|e| format!("Failed to create output directory: {}", e))?;
+
+                // Download files in parallel
+                let (files_count, total_size) = download_files_parallel(
+                    &client,
+                    files,
+                    &url_info.path,
+                    &final_output,
+                    &options,
+                    &app,
+                )
+                .await?;
+
+                // Emit completion
+                let _ = app.emit(
+                    "git-download-progress",
+                    GitDownloadProgress {
+                        stage: "complete".to_string(),
+                        percent: 100,
+                        message: format!("Successfully downloaded {} files", files_count),
+                        total_files: Some(files_count),
+                        processed_files: Some(files_count),
+                    },
+                );
+
+                Ok(GitDownloadResult {
+                    success: true,
+                    files_count,
+                    total_size,
+                    output_path: final_output.to_string_lossy().to_string(),
+                })
+            }
+            Err(e) => {
+                // If Contents API fails (e.g., rate limit, large directory), fall back to zipball
+                log::warn!("Contents API failed, falling back to zipball: {}", e);
+
+                // Check if it's a rate limit error - don't fall back in that case
+                if e.contains("rate limit") || e.contains("Access denied") {
+                    return Err(e);
+                }
+
+                // Fall back to zipball method
+                download_via_zipball(&app, &client, &url_info, &output_path, &options).await
+            }
+        }
+    } else {
+        // Use zipball for full repository downloads
+        download_via_zipball(&app, &client, &url_info, &output_path, &options).await
+    }
 }
 
 #[tauri::command]

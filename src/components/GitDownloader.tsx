@@ -291,13 +291,6 @@ export function GitDownloader({
               </div>
             </div>
 
-            {/* Note about full repo download */}
-            {parsedUrl?.path && progress.stage === 'downloading' && (
-              <p className="text-xs text-buncha-text-muted/70 text-center mt-4">
-                Downloading full repository, then extracting selected folder
-              </p>
-            )}
-
             {/* Cancel Button */}
             <div className="text-center mt-4">
               <button
