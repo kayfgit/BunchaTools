@@ -17,6 +17,7 @@ import {
   QrCode,
   Braces,
   Palette,
+  GitBranch,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 
@@ -33,6 +34,10 @@ import type {
   QRCodeData,
   ColorFormats,
   QuickResult,
+  GitHubUrlInfo,
+  GitDownloadOptions,
+  GitDownloadProgress,
+  GitDownloadResult,
 } from "./types";
 
 // Import constants
@@ -49,6 +54,7 @@ import {
   evaluateExpression,
   parseColorQuery,
   rgbToHex,
+  parseGitHubUrl,
 } from "./utils";
 
 // Import components
@@ -61,6 +67,7 @@ import {
   ColorPickerPanel,
   QRGenerator,
   RegexTester,
+  GitDownloader,
 } from "./components";
 
 function App() {
@@ -89,6 +96,7 @@ function App() {
   const isDialogOpenRef = useRef(false);
   const settingsInitialized = useRef(false);
   const toolItemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const gitDownloadingRef = useRef(false);
 
   // Video Converter state
   const [showVideoConverter, setShowVideoConverter] = useState(false);
@@ -155,6 +163,22 @@ function App() {
   const [regexFlags, setRegexFlags] = useState({ g: true, i: true, m: false, s: false });
   const [regexActiveTab, setRegexActiveTab] = useState<"matches" | "groups" | "replace">("matches");
   const [regexCopiedItem, setRegexCopiedItem] = useState<string | null>(null);
+
+  // Git Downloader state
+  const [showGitDownloader, setShowGitDownloader] = useState(false);
+  const [gitUrlInput, setGitUrlInput] = useState("");
+  const [gitParsedUrl, setGitParsedUrl] = useState<GitHubUrlInfo | null>(null);
+  const [gitDownloadPath, setGitDownloadPath] = useState("");
+  const [gitDownloadOptions, setGitDownloadOptions] = useState<GitDownloadOptions>({
+    extractFiles: true,
+    flattenStructure: false,
+    createSubfolder: true,
+  });
+  const [gitProgress, setGitProgress] = useState<GitDownloadProgress>({
+    stage: 'idle',
+    percent: 0,
+    message: '',
+  });
 
   // Define tools
   const tools: Tool[] = [
@@ -273,6 +297,31 @@ function App() {
       },
     },
     {
+      id: "git-downloader",
+      name: "Git Downloader",
+      description: "Download folders from GitHub repositories",
+      icon: GitBranch,
+      keywords: ["git", "github", "download", "folder", "repo", "repository", "clone", "subdirectory", "sparse", "partial"],
+      action: async () => {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowGitDownloader(true);
+        setGitUrlInput("");
+        setGitParsedUrl(null);
+        setGitDownloadPath("");
+        setGitDownloadOptions({
+          extractFiles: true,
+          flattenStructure: false,
+          createSubfolder: true,
+        });
+        setGitProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+        setQuery("");
+      },
+    },
+    {
       id: "settings",
       name: "Settings",
       description: "Configure BunchaTools preferences",
@@ -385,6 +434,24 @@ function App() {
     };
   }, []);
 
+  // Listen for git download progress events
+  useEffect(() => {
+    const unlisten = listen<GitDownloadProgress>("git-download-progress", (event) => {
+      setGitProgress(event.payload);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Keep ref in sync with git download status
+  useEffect(() => {
+    gitDownloadingRef.current = gitProgress.stage === 'fetching' ||
+                                gitProgress.stage === 'downloading' ||
+                                gitProgress.stage === 'extracting';
+  }, [gitProgress.stage]);
+
   useEffect(() => {
     const unlisten = listen("focus-search", async () => {
       await invoke("set_auto_hide", { enabled: true });
@@ -430,6 +497,23 @@ function App() {
       setQRImageDataUrl("");
       setQRCopied(false);
       setShowRegexTester(false);
+      // Only reset Git Downloader if not actively downloading
+      if (!gitDownloadingRef.current) {
+        setShowGitDownloader(false);
+        setGitUrlInput("");
+        setGitParsedUrl(null);
+        setGitDownloadPath("");
+        setGitDownloadOptions({
+          extractFiles: true,
+          flattenStructure: false,
+          createSubfolder: true,
+        });
+        setGitProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+      }
       inputRef.current?.focus();
     });
 
@@ -456,6 +540,7 @@ function App() {
       setShowColorPicker(false);
       setShowQRGenerator(false);
       setShowRegexTester(false);
+      setShowGitDownloader(false);
 
       try {
         // Start text selection mode using the app handle version (works from hotkey context)
@@ -704,10 +789,12 @@ function App() {
       return { width: showQRCustomization ? 1000 : 800, minHeight: 400, maxHeight: 700 };
     } else if (showRegexTester) {
       return { width: 1000, minHeight: 400, maxHeight: 700 };
+    } else if (showGitDownloader) {
+      return { width: 720, minHeight: 350, maxHeight: 720 };
     }
     // Command palette
     return { width: 680, minHeight: 200, maxHeight: 550 };
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader]);
 
   // Auto-resize window based on content
   const { contentRef } = useWindowAutoSize<HTMLDivElement>({
@@ -730,7 +817,7 @@ function App() {
     if (e.key === "Escape") return;
 
     // Handle navigation only in command palette mode
-    if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester) {
+    if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester && !showGitDownloader) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -1021,6 +1108,27 @@ function App() {
         setShowQRGenerator(false);
       } else if (showRegexTester) {
         setShowRegexTester(false);
+      } else if (showGitDownloader) {
+        // Don't reset if download is actively in progress
+        const isDownloading = gitProgress.stage === 'fetching' ||
+                             gitProgress.stage === 'downloading' ||
+                             gitProgress.stage === 'extracting';
+        if (!isDownloading) {
+          setShowGitDownloader(false);
+          setGitUrlInput("");
+          setGitParsedUrl(null);
+          setGitDownloadPath("");
+          setGitDownloadOptions({
+            extractFiles: true,
+            flattenStructure: false,
+            createSubfolder: true,
+          });
+          setGitProgress({
+            stage: 'idle',
+            percent: 0,
+            message: '',
+          });
+        }
       } else {
         // No panel open - hide the window
         await invoke("hide_window");
@@ -1030,7 +1138,7 @@ function App() {
 
     window.addEventListener("keydown", handleGlobalEscape);
     return () => window.removeEventListener("keydown", handleGlobalEscape);
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, gitProgress.stage, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
 
   // Color picker blur handler
   useEffect(() => {
@@ -1119,10 +1227,46 @@ function App() {
     };
   }, [showRegexTester]);
 
+  // Git Downloader blur handler
+  // Don't reset if download is in progress - keep state so user can return to see progress
+  useEffect(() => {
+    if (!showGitDownloader) return;
+
+    const handleBlur = () => {
+      // Don't reset if download is actively in progress
+      const isDownloading = gitProgress.stage === 'fetching' ||
+                           gitProgress.stage === 'downloading' ||
+                           gitProgress.stage === 'extracting';
+
+      if (!isDraggingRef.current && !isDialogOpenRef.current && !isDownloading) {
+        setShowGitDownloader(false);
+        setGitUrlInput("");
+        setGitParsedUrl(null);
+        setGitDownloadPath("");
+        setGitDownloadOptions({
+          extractFiles: true,
+          flattenStructure: false,
+          createSubfolder: true,
+        });
+        setGitProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showGitDownloader, gitProgress.stage]);
+
   // Command palette blur handler (hides window on blur)
   useEffect(() => {
     // Only handle blur when command palette is visible (no other panel is open)
-    const isCommandPaletteVisible = !showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester;
+    const isCommandPaletteVisible = !showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader;
     if (!isCommandPaletteVisible) return;
 
     const handleBlur = async () => {
@@ -1136,7 +1280,7 @@ function App() {
     return () => {
       window.removeEventListener("blur", handleBlur);
     };
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -1355,6 +1499,117 @@ function App() {
     setVideoConversionStatus('idle');
   };
 
+  // Git Downloader handlers
+  const handleGitUrlChange = (url: string) => {
+    setGitUrlInput(url);
+    const parsed = parseGitHubUrl(url);
+    setGitParsedUrl(parsed);
+  };
+
+  const handleGitPaste = async () => {
+    try {
+      const clipboardText = await readText();
+      if (clipboardText) {
+        handleGitUrlChange(clipboardText);
+      }
+    } catch (e) {
+      console.error("Failed to read clipboard:", e);
+    }
+  };
+
+  const handleGitSelectFolder = async () => {
+    isDialogOpenRef.current = true;
+    await invoke("set_auto_hide", { enabled: false });
+
+    const result = await open({
+      directory: true,
+      multiple: false,
+    });
+
+    await invoke("set_auto_hide", { enabled: true });
+    isDialogOpenRef.current = false;
+
+    if (result) {
+      setGitDownloadPath(result as string);
+    }
+  };
+
+  const handleGitDownload = async () => {
+    if (!gitParsedUrl || !gitDownloadPath) return;
+
+    setGitProgress({
+      stage: 'fetching',
+      percent: 0,
+      message: 'Connecting to GitHub...',
+    });
+
+    try {
+      const result = await invoke<GitDownloadResult>("download_github_folder", {
+        urlInfo: {
+          owner: gitParsedUrl.owner,
+          repo: gitParsedUrl.repo,
+          branch: gitParsedUrl.branch,
+          path: gitParsedUrl.path,
+        },
+        outputPath: gitDownloadPath,
+        options: {
+          extract_files: gitDownloadOptions.extractFiles,
+          flatten_structure: gitDownloadOptions.flattenStructure,
+          create_subfolder: gitDownloadOptions.createSubfolder,
+        },
+      });
+
+      setGitProgress({
+        stage: 'complete',
+        percent: 100,
+        message: `Successfully downloaded ${result.files_count} files`,
+        processedFiles: result.files_count,
+        outputPath: result.output_path,
+      });
+    } catch (e) {
+      setGitProgress({
+        stage: 'error',
+        percent: 0,
+        message: '',
+        errorMessage: String(e),
+      });
+    }
+  };
+
+  const handleGitOpenFolder = async () => {
+    const path = gitProgress.outputPath || gitDownloadPath;
+    if (path) {
+      try {
+        await invoke("open_folder_in_explorer", { path });
+      } catch (e) {
+        console.error("Failed to open folder:", e);
+      }
+    }
+  };
+
+  const handleGitReset = async () => {
+    // Cancel any ongoing download
+    try {
+      await invoke("cancel_git_download");
+    } catch (e) {
+      // Ignore errors if no download in progress
+    }
+
+    setGitUrlInput("");
+    setGitParsedUrl(null);
+    setGitDownloadPath("");
+    setGitDownloadOptions({
+      extractFiles: true,
+      flattenStructure: false,
+      createSubfolder: true,
+    });
+    setGitProgress({
+      stage: 'idle',
+      percent: 0,
+      message: '',
+    });
+  };
+
   return (
     <div
       ref={contentRef}
@@ -1362,7 +1617,7 @@ function App() {
       spellCheck={false}
     >
       {/* Command Palette - Hidden when tools are open */}
-      {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && (
+      {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader && (
         <CommandPalette
           query={query}
           setQuery={setQuery}
@@ -1510,6 +1765,25 @@ function App() {
           setActiveTab={setRegexActiveTab}
           copiedItem={regexCopiedItem}
           setCopiedItem={setRegexCopiedItem}
+          onDragStart={handleDragStart}
+        />
+      )}
+
+      {/* Git Downloader Panel */}
+      {showGitDownloader && (
+        <GitDownloader
+          urlInput={gitUrlInput}
+          setUrlInput={handleGitUrlChange}
+          parsedUrl={gitParsedUrl}
+          downloadPath={gitDownloadPath}
+          options={gitDownloadOptions}
+          setOptions={setGitDownloadOptions}
+          progress={gitProgress}
+          onPaste={handleGitPaste}
+          onSelectFolder={handleGitSelectFolder}
+          onDownload={handleGitDownload}
+          onOpenFolder={handleGitOpenFolder}
+          onReset={handleGitReset}
           onDragStart={handleDragStart}
         />
       )}

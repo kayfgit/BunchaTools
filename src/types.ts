@@ -144,3 +144,36 @@ export interface PartialCurrencySuggestion {
   to: string;
   suggestedQuery: string;
 }
+
+// Git Downloader Types
+export interface GitHubUrlInfo {
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string; // folder path within repo (empty for root)
+  isValid: boolean;
+  fullUrl: string;
+}
+
+export interface GitDownloadOptions {
+  extractFiles: boolean; // true = extract, false = keep as ZIP
+  flattenStructure: boolean; // true = all files in root, no subdirs
+  createSubfolder: boolean; // create folder with repo/folder name
+}
+
+export interface GitDownloadProgress {
+  stage: 'idle' | 'fetching' | 'downloading' | 'extracting' | 'complete' | 'error';
+  percent: number;
+  message: string;
+  totalFiles?: number;
+  processedFiles?: number;
+  errorMessage?: string;
+  outputPath?: string;
+}
+
+export interface GitDownloadResult {
+  success: boolean;
+  files_count: number;
+  total_size: number;
+  output_path: string;
+}

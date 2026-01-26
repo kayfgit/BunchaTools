@@ -6,6 +6,7 @@ import type {
   CurrencyQuery,
   QRCodeType,
   QRCodeData,
+  GitHubUrlInfo,
 } from "./types";
 import { UNIT_CATEGORIES, DEFAULT_UNIT_TARGETS, CURRENCY_ALIASES } from "./constants";
 
@@ -881,4 +882,81 @@ export function estimateOutputSize(
   const videoBits = bitrate * 1000 * duration;
   const audioBits = hasAudio ? 128 * 1000 * duration : 0; // assume 128kbps audio
   return Math.floor((videoBits + audioBits) / 8);
+}
+
+// ============ GitHub URL Parsing Utilities ============
+
+export function parseGitHubUrl(url: string): GitHubUrlInfo | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  // Pattern 1: Full URL with tree/branch/path
+  // https://github.com/owner/repo/tree/branch/folder/path
+  const treePattern = /^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/tree\/([^\/]+)(?:\/(.+))?$/;
+  const treeMatch = trimmed.match(treePattern);
+  if (treeMatch) {
+    return {
+      owner: treeMatch[1],
+      repo: treeMatch[2].replace(/\.git$/, ''),
+      branch: treeMatch[3],
+      path: treeMatch[4] || '',
+      isValid: true,
+      fullUrl: trimmed,
+    };
+  }
+
+  // Pattern 2: Blob URL (file URL, convert to folder by removing filename)
+  // https://github.com/owner/repo/blob/branch/folder/file.ext
+  const blobPattern = /^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)$/;
+  const blobMatch = trimmed.match(blobPattern);
+  if (blobMatch) {
+    const fullPath = blobMatch[4];
+    const pathParts = fullPath.split('/');
+    pathParts.pop(); // Remove the filename
+    return {
+      owner: blobMatch[1],
+      repo: blobMatch[2].replace(/\.git$/, ''),
+      branch: blobMatch[3],
+      path: pathParts.join('/'),
+      isValid: true,
+      fullUrl: trimmed,
+    };
+  }
+
+  // Pattern 3: Repository URL only (no branch/path)
+  // https://github.com/owner/repo or https://github.com/owner/repo.git
+  const repoPattern = /^https?:\/\/github\.com\/([^\/]+)\/([^\/]+?)(\.git)?\/?$/;
+  const repoMatch = trimmed.match(repoPattern);
+  if (repoMatch) {
+    return {
+      owner: repoMatch[1],
+      repo: repoMatch[2].replace(/\.git$/, ''),
+      branch: 'main', // Default to main, will try master if main fails
+      path: '',
+      isValid: true,
+      fullUrl: trimmed,
+    };
+  }
+
+  // Pattern 4: SSH URL
+  // git@github.com:owner/repo.git
+  const sshPattern = /^git@github\.com:([^\/]+)\/([^\/]+?)(\.git)?$/;
+  const sshMatch = trimmed.match(sshPattern);
+  if (sshMatch) {
+    return {
+      owner: sshMatch[1],
+      repo: sshMatch[2].replace(/\.git$/, ''),
+      branch: 'main',
+      path: '',
+      isValid: true,
+      fullUrl: trimmed,
+    };
+  }
+
+  return null;
+}
+
+export function formatGitHubPath(path: string): string {
+  if (!path) return '/ (entire repository)';
+  return '/' + path;
 }
