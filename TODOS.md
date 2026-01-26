@@ -25,3 +25,4 @@
 [x] - Fix window sizing when moving between tools
 [x] - Add git downloader tool
 [x] - Make git downloader tool more efficient (Currently downloads full repository then extracts specific folder)
+[] - Remove background on README images

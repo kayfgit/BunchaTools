@@ -39,84 +39,32 @@ BunchaTools puts all these utilities in one place, accessible instantly with a s
 
 # Features
 
-### Quick Access
 - Global hotkey activation (default: `Alt+Q`)
 - Auto-hide when clicking away
 - Instant search and filtering
 
-### Built-in Calculator
-Evaluate math expressions directly in the search bar. Just type your calculation and see the result instantly.
+### Tools
 
-Supports: `+`, `-`, `*`, `/`, `^` (power), parentheses
+| Tool | Description |
+|------|-------------|
+| **Color Picker** | Pick any color from your screen and get it in multiple formats (HEX, RGB, HSL, etc.) |
+| **Video Converter** | Convert videos between formats with quality presets. All conversions happen locally using FFmpeg |
+| **Port Killer** | Find and kill processes using specific ports with quick presets for common dev ports |
+| **Quick Translation** | Translate text between 30+ languages with automatic language detection |
+| **QR Code Generator** | Generate QR codes for URLs, WiFi, contacts, events, and more. Export to PNG, SVG, or PDF |
+| **Regex Tester** | Test and debug regular expressions with real-time matching, groups, and find-and-replace |
+| **Git Downloader** | Download specific folders from GitHub repositories without cloning the entire repo |
 
-### Currency Converter
-Convert between currencies in real-time using natural queries.
+### Quick Features
 
-- Query examples: `20 usd in yen`, `100 eur to gbp`
-- Supports 30+ currencies with aliases (dollar, euro, pound, yen, etc.)
-- Live exchange rates from Frankfurter API
+These work directly in the search bar:
 
-### Color Picker
-Pick any color from anywhere on your screen. Click to capture and choose from all of the relevant color formats for professionals.
-
-### Converters
-Convert media files locally without uploading to sketchy websites or dealing with watermarks.
-
-**Supported formats:**
-- Images: PNG, JPG, WEBP, GIF, BMP, ICO
-- Audio: MP3, WAV, FLAC, AAC, OGG, M4A
-- Video: MP4, AVI, MOV, GIF, WEBM, MKV
-
-All conversions happen locally using FFmpeg. Your files never leave your machine.
-
-### Port Killer
-Free up ports by killing processes with a few clicks. No more remembering `netstat` commands.
-
-- Scan for processes on specific ports
-- View process details (PID, name, protocol)
-- Kill processes instantly
-- Quick presets for common development ports (3000, 5173, 8080, etc.)
-
-### Quick Translation
-Translate text between 30+ languages. Simply enable text selection mode, highlight any text on your screen, and get an instant translation.
-
-- Automatic language detection
-- Supports English, Japanese, Spanish, French, German, Chinese, Korean, Portuguese, Russian, Italian, Arabic, and many more
-- Works with any text on your screen
-
-### QR Code Generator
-Generate QR codes instantly for various use cases without relying on online generators.
-
-**Supported QR code types:**
-- **URL**: Website links and URLs
-- **WiFi**: Network credentials (SSID, password, encryption type)
-- **Email**: Pre-filled email addresses with optional subject lines
-- **Phone**: Phone numbers for quick dialing
-- **Text**: Plain text messages
-- **vCard**: Contact cards with name, phone, and email
-- **Location**: Geographic coordinates (latitude/longitude)
-- **Event**: Calendar events with title, date range, and location
-
-**Features:**
-- Real-time preview as you type
-- Custom foreground and background colors
-- Copy QR code image to clipboard
-- Export to PNG, SVG, or PDF formats
-
-All QR codes are generated locally on your machine.
-
-### Regex Tester
-Test and debug regular expressions with real-time feedback. No need to visit online regex testing sites.
-
-**Features:**
-- Real-time pattern matching as you type
-- Flag toggles: global (g), case insensitive (i), multiline (m), dot-all (s)
-- View all matches with their positions in the test string
-- Capture group extraction and visualization
-- Find-and-replace preview with highlighted replacements
-- Support for group references ($1, $2, etc.) in replacements
-- Copy pattern with flags, individual matches, or replacement results
-- Built-in quick reference for common regex patterns
+| Feature | Description |
+|---------|-------------|
+| **Calculator** | Evaluate math expressions instantly (`2 + 2 * 3`, supports `^` for powers) |
+| **Currency Converter** | Convert currencies with live rates (`100 usd to eur`, `50 pounds in yen`) |
+| **Unit Converter** | Convert length, weight, temperature, volume, and time units |
+| **Color Converter** | Parse and convert color formats with visual preview |
 
 # Installation
 
