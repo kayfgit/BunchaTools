@@ -36,6 +36,8 @@ pub struct Settings {
     pub window_position: Option<(i32, i32)>, // Saved window position (x, y)
     #[serde(default = "default_show_in_tray")]
     pub show_in_tray: bool,
+    #[serde(default)]
+    pub command_only_mode: bool, // Show only command input, no tool suggestions
     // Quick Translation settings
     #[serde(default = "default_quick_translation_modifiers")]
     pub quick_translation_hotkey_modifiers: Vec<String>,
@@ -65,6 +67,7 @@ impl Default for Settings {
             launch_at_startup: false,
             window_position: None,
             show_in_tray: true,
+            command_only_mode: false,
             quick_translation_hotkey_modifiers: default_quick_translation_modifiers(),
             quick_translation_hotkey_key: String::new(), // Disabled by default
             quick_translation_target_language: default_quick_translation_target_language(),
@@ -1773,6 +1776,14 @@ async fn cancel_git_download(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_downloads_path(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .download_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("Could not find downloads directory: {}", e))
+}
+
+#[tauri::command]
 async fn open_folder_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -2366,6 +2377,7 @@ pub fn run() {
             convert_video,
             download_github_folder,
             cancel_git_download,
+            get_downloads_path,
             open_folder_in_explorer,
             get_youtube_video_info,
             download_youtube_video,

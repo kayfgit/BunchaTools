@@ -77,6 +77,7 @@ import {
   GitDownloader,
   YouTubeDownloader,
 } from "./components";
+import type { CommandStatus } from "./components/CommandPalette";
 
 function App() {
   const [query, setQuery] = useState("");
@@ -91,6 +92,7 @@ function App() {
     show_in_tray: true,
     automatic_updates: false,
     theme: "dark",
+    command_only_mode: false,
     quick_translation_hotkey_modifiers: ["Ctrl", "Alt"],
     quick_translation_hotkey_key: "",
     quick_translation_target_language: "en",
@@ -204,6 +206,13 @@ function App() {
     message: '',
   });
   const [ytValidationError, setYtValidationError] = useState<string | null>(null);
+
+  // Command-only mode state
+  const [commandStatus, setCommandStatus] = useState<CommandStatus>({
+    message: "Type a command...",
+    type: 'idle',
+  });
+  const commandStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -494,12 +503,19 @@ function App() {
   useEffect(() => {
     const unlisten = listen<GitDownloadProgress>("git-download-progress", (event) => {
       setGitProgress(event.payload);
+      // Also update command status if in command-only mode and downloading
+      if (settings.command_only_mode && event.payload.stage === 'downloading') {
+        setCommandStatus({
+          message: `Downloading... ${event.payload.percent}%`,
+          type: 'progress',
+        });
+      }
     });
 
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [settings.command_only_mode]);
 
   // Listen for YouTube download progress events
   useEffect(() => {
@@ -844,6 +860,8 @@ function App() {
   }, [selectedIndex]);
 
   // Window size configuration based on active view
+  // In command only mode, window always stays compact (no tool list shown)
+  const isCommandOnlyCollapsed = settings.command_only_mode;
   const windowSizeConfig = useMemo(() => {
     if (showVideoConverter) {
       return { width: 900, minHeight: 400, maxHeight: 900 };
@@ -852,7 +870,7 @@ function App() {
     } else if (showTranslation) {
       return { width: 680, minHeight: 300, maxHeight: 600 };
     } else if (showSettings) {
-      return { width: 680, minHeight: 200, maxHeight: 500 };
+      return { width: 680, minHeight: 200, maxHeight: 550 };
     } else if (showColorPicker) {
       return { width: 880, minHeight: 400, maxHeight: 700 };
     } else if (showQRGenerator) {
@@ -864,9 +882,12 @@ function App() {
     } else if (showYouTubeDownloader) {
       return { width: 720, minHeight: 400, maxHeight: 800 };
     }
-    // Command palette
+    // Command palette - use smaller height in command only mode when collapsed
+    if (isCommandOnlyCollapsed) {
+      return { width: 680, minHeight: 62, maxHeight: 70 };
+    }
     return { width: 680, minHeight: 200, maxHeight: 550 };
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader, showYouTubeDownloader]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader, showYouTubeDownloader, isCommandOnlyCollapsed]);
 
   // Auto-resize window based on content
   const { contentRef } = useWindowAutoSize<HTMLDivElement>({
@@ -890,6 +911,18 @@ function App() {
 
     // Handle navigation only in command palette mode
     if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester && !showGitDownloader && !showYouTubeDownloader) {
+      // Command-only mode: execute command on Enter
+      if (settings.command_only_mode) {
+        if (e.key === "Enter" && query.trim()) {
+          e.preventDefault();
+          const commandToExecute = query;
+          setQuery(""); // Clear input immediately
+          await executeCommand(commandToExecute);
+        }
+        return;
+      }
+
+      // Normal mode: tool navigation
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -1740,6 +1773,79 @@ function App() {
     });
   };
 
+  // Command-only mode: Execute command from natural language input
+  const executeCommand = async (input: string) => {
+    // Clear any existing timeout
+    if (commandStatusTimeoutRef.current) {
+      clearTimeout(commandStatusTimeoutRef.current);
+      commandStatusTimeoutRef.current = null;
+    }
+
+    // Parse "download <github-url>" command
+    const downloadMatch = input.match(/^download\s+(https?:\/\/github\.com\/[^\s]+)/i);
+    if (downloadMatch) {
+      const url = downloadMatch[1];
+      const parsed = parseGitHubUrl(url);
+
+      if (!parsed || !parsed.isValid) {
+        setCommandStatus({ message: "Invalid GitHub URL", type: 'error' });
+        commandStatusTimeoutRef.current = setTimeout(() => {
+          setCommandStatus({ message: "Type a command...", type: 'idle' });
+        }, 1000);
+        return;
+      }
+
+      // Get downloads directory
+      let downloadsPath: string;
+      try {
+        downloadsPath = await invoke<string>("get_downloads_path");
+      } catch (e) {
+        setCommandStatus({ message: "Could not find Downloads folder", type: 'error' });
+        commandStatusTimeoutRef.current = setTimeout(() => {
+          setCommandStatus({ message: "Type a command...", type: 'idle' });
+        }, 1000);
+        return;
+      }
+
+      // Start download
+      setCommandStatus({ message: "Downloading... 0%", type: 'progress' });
+
+      try {
+        const result = await invoke<GitDownloadResult>("download_github_folder", {
+          urlInfo: {
+            owner: parsed.owner,
+            repo: parsed.repo,
+            branch: parsed.branch,
+            path: parsed.path,
+          },
+          outputPath: downloadsPath,
+          options: {
+            extract_files: true,
+            flatten_structure: false,
+            create_subfolder: true,
+          },
+        });
+
+        setCommandStatus({ message: result.output_path, type: 'success' });
+        commandStatusTimeoutRef.current = setTimeout(() => {
+          setCommandStatus({ message: "Type a command...", type: 'idle' });
+        }, 1000);
+      } catch (e) {
+        setCommandStatus({ message: String(e), type: 'error' });
+        commandStatusTimeoutRef.current = setTimeout(() => {
+          setCommandStatus({ message: "Type a command...", type: 'idle' });
+        }, 1000);
+      }
+      return;
+    }
+
+    // Unknown command
+    setCommandStatus({ message: "Unknown command", type: 'error' });
+    commandStatusTimeoutRef.current = setTimeout(() => {
+      setCommandStatus({ message: "Type a command...", type: 'idle' });
+    }, 1000);
+  };
+
   // YouTube Downloader handlers - synchronous URL change handler
   const handleYtUrlChange = (url: string) => {
     setYtUrlInput(url);
@@ -1911,8 +2017,11 @@ function App() {
           status={status}
           quickResult={quickResult}
           currencyLoading={currencyLoading}
+          commandOnlyMode={settings.command_only_mode}
+          commandStatus={commandStatus}
           onToolExecute={executeTool}
           onKeyDown={handleKeyDown}
+          onOpenSettings={() => setShowSettings(true)}
           inputRef={inputRef}
           toolItemRefs={toolItemRefs}
           onDragStart={handleDragStart}

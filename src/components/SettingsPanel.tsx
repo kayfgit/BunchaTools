@@ -172,6 +172,35 @@ export function SettingsPanel({
             <option value="system">System</option>
           </select>
         </div>
+
+        {/* Command Only Mode */}
+        <div className="flex items-center justify-between py-3">
+          <div>
+            <h3 className="text-buncha-text font-medium mb-0.5">Command Only Mode</h3>
+            <p className="text-sm text-buncha-text-muted">Allow only command input, no manual tools</p>
+          </div>
+          <button
+            onClick={() =>
+              setSettings((prev) => ({
+                ...prev,
+                command_only_mode: !prev.command_only_mode,
+              }))
+            }
+            className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${
+              settings.command_only_mode
+                ? "bg-buncha-accent"
+                : "bg-buncha-surface border border-buncha-border"
+            }`}
+          >
+            <div
+              className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.command_only_mode
+                  ? "right-0.5"
+                  : "left-0.5"
+              }`}
+            />
+          </button>
+        </div>
       </div>
     </div>
   );

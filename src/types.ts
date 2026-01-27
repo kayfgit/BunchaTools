@@ -17,6 +17,7 @@ export interface Settings {
   show_in_tray: boolean;
   automatic_updates: boolean;
   theme: "dark" | "light" | "system";
+  command_only_mode: boolean;
   // Quick Translation settings
   quick_translation_hotkey_modifiers: string[];
   quick_translation_hotkey_key: string;
