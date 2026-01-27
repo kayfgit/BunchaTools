@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { downloadDir } from "@tauri-apps/api/path";
 import { useWindowAutoSize } from "./hooks";
 import {
   Pipette,
@@ -357,7 +358,13 @@ function App() {
         setYtUrlInput("");
         setYtParsedUrl(null);
         setYtVideoInfo(null);
-        setYtDownloadPath("");
+        // Set default download path to Downloads folder
+        try {
+          const defaultPath = await downloadDir();
+          setYtDownloadPath(defaultPath);
+        } catch {
+          setYtDownloadPath("");
+        }
         setYtDownloadOptions({
           quality: 'best',
           mode: 'video_audio',
@@ -574,6 +581,9 @@ function App() {
           message: '',
         });
       }
+      // Always close YouTube Downloader panel, but don't reset state if downloading
+      // (download continues in background, user returns to command palette)
+      setShowYouTubeDownloader(false);
       inputRef.current?.focus();
     });
 
@@ -1192,10 +1202,11 @@ function App() {
           });
         }
       } else if (showYouTubeDownloader) {
-        // Don't reset if download is actively in progress
         const isDownloading = ytProgress.stage === 'downloading';
+        // Always close the panel
+        setShowYouTubeDownloader(false);
+        // Only reset state if not downloading (download continues in background)
         if (!isDownloading) {
-          setShowYouTubeDownloader(false);
           setYtUrlInput("");
           setYtParsedUrl(null);
           setYtVideoInfo(null);
@@ -1345,16 +1356,20 @@ function App() {
   }, [showGitDownloader, gitProgress.stage]);
 
   // YouTube Downloader blur handler
-  // Don't reset if download is in progress - keep state so user can return to see progress
+  // Close panel on blur, but preserve state if download is in progress
   useEffect(() => {
     if (!showYouTubeDownloader) return;
 
     const handleBlur = () => {
-      // Don't reset if download is actively in progress
+      if (isDraggingRef.current || isDialogOpenRef.current) return;
+
       const isDownloading = ytProgress.stage === 'downloading';
 
-      if (!isDraggingRef.current && !isDialogOpenRef.current && !isDownloading) {
-        setShowYouTubeDownloader(false);
+      // Always close the panel
+      setShowYouTubeDownloader(false);
+
+      // Only reset state if not downloading (download continues in background)
+      if (!isDownloading) {
         setYtUrlInput("");
         setYtParsedUrl(null);
         setYtVideoInfo(null);

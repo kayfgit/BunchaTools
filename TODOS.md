@@ -35,3 +35,4 @@
 [] - Remove background on README images
 [] - Add Clipboard History tool
 [] - Add compact mode on settings
+[] - For the downloader tools, add a little green progress bar on the command palette next to the tools so that users can check the progress without opening the app

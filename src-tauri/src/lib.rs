@@ -1855,28 +1855,31 @@ async fn get_youtube_video_info(url: String) -> Result<YouTubeVideoInfo, String>
 }
 
 fn build_format_selector(quality: &str, mode: &str) -> String {
+    // Format selectors with comprehensive fallbacks to ensure downloads work
+    // even without ffmpeg for merging or when specific qualities aren't available
     match mode {
         "audio_only" => "bestaudio[ext=m4a]/bestaudio/best".to_string(),
         "video_only" => {
             match quality {
                 "best" => "bestvideo/best".to_string(),
-                "4k" => "bestvideo[height<=2160]/best[height<=2160]".to_string(),
-                "1080p" => "bestvideo[height<=1080]/best[height<=1080]".to_string(),
-                "720p" => "bestvideo[height<=720]/best[height<=720]".to_string(),
-                "480p" => "bestvideo[height<=480]/best[height<=480]".to_string(),
-                "360p" => "bestvideo[height<=360]/best[height<=360]".to_string(),
+                "4k" => "bestvideo[height<=2160]/best[height<=2160]/bestvideo/best".to_string(),
+                "1080p" => "bestvideo[height<=1080]/best[height<=1080]/bestvideo/best".to_string(),
+                "720p" => "bestvideo[height<=720]/best[height<=720]/bestvideo/best".to_string(),
+                "480p" => "bestvideo[height<=480]/best[height<=480]/bestvideo/best".to_string(),
+                "360p" => "bestvideo[height<=360]/best[height<=360]/bestvideo/best".to_string(),
                 _ => "bestvideo/best".to_string(),
             }
         }
         _ => {
             // video_audio (default)
+            // Try merged formats first, then fall back to pre-merged formats, then to best available
             match quality {
                 "best" => "bestvideo+bestaudio/best".to_string(),
-                "4k" => "bestvideo[height<=2160]+bestaudio/best[height<=2160]".to_string(),
-                "1080p" => "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
-                "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
-                "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
-                "360p" => "bestvideo[height<=360]+bestaudio/best[height<=360]".to_string(),
+                "4k" => "bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo+bestaudio/best".to_string(),
+                "1080p" => "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best".to_string(),
+                "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best".to_string(),
+                "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best".to_string(),
+                "360p" => "bestvideo[height<=360]+bestaudio/best[height<=360]/bestvideo+bestaudio/best".to_string(),
                 _ => "bestvideo+bestaudio/best".to_string(),
             }
         }
