@@ -1,3 +1,9 @@
+# OBJECTIVE 
+
+[] - Find out a way to make the most efficient all-in-one desktop app in the world
+
+# TODOS
+
 [x] - Fix broken video converter on current release (After selecting file to be converted nothing happens)
 [x] - Fix flickering in between transitions 
 [] - Fix icons (It's off center)
@@ -23,6 +29,9 @@
 [x] - Fix app not getting focused when opening up causing the first input to not happen
 [x] - Add shortcut for quick translation tool, allowing users to set up a hotkey, highlight text and instantly translate it
 [x] - Fix window sizing when moving between tools
-[x] - Add git downloader tool
-[x] - Make git downloader tool more efficient (Currently downloads full repository then extracts specific folder)
+[x] - Add Git Downloader tool
+[x] - Make Git Downloader tool more efficient (Currently downloads full repository then extracts specific folder)
+[x] - Add Youtube Downloader tool
 [] - Remove background on README images
+[] - Add Clipboard History tool
+[] - Add compact mode on settings

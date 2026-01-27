@@ -177,3 +177,38 @@ export interface GitDownloadResult {
   total_size: number;
   output_path: string;
 }
+
+// YouTube Downloader Types
+export type YouTubeQuality = 'best' | '4k' | '1080p' | '720p' | '480p' | '360p';
+export type YouTubeDownloadMode = 'video_audio' | 'audio_only' | 'video_only';
+
+export interface YouTubeVideoInfo {
+  url: string;
+  title: string;
+  thumbnail: string;
+  duration: number;
+  channel: string;
+  isValid: boolean;
+}
+
+export interface YouTubeDownloadOptions {
+  quality: YouTubeQuality;
+  mode: YouTubeDownloadMode;
+}
+
+export interface YouTubeDownloadProgress {
+  stage: 'idle' | 'validating' | 'downloading' | 'complete' | 'error';
+  percent: number;
+  message: string;
+  downloadSpeed?: string;
+  eta?: string;
+  fileSize?: string;
+  errorMessage?: string;
+  outputPath?: string;
+}
+
+export interface YouTubeUrlInfo {
+  videoId: string;
+  isValid: boolean;
+  originalUrl: string;
+}

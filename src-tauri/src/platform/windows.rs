@@ -508,3 +508,36 @@ pub fn get_ffmpeg_path() -> Result<std::path::PathBuf, String> {
         cwd, possible_paths
     ))
 }
+
+pub fn get_ytdlp_path() -> Result<std::path::PathBuf, String> {
+    // Get executable directory
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
+
+    // Get current working directory
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    let possible_paths = vec![
+        // Production paths
+        exe_dir.join("yt-dlp.exe"),
+        exe_dir.join("binaries").join("yt-dlp.exe"),
+        // Development paths (relative to cwd) - Tauri externalBin naming convention
+        cwd.join("src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"),
+        cwd.join("binaries/yt-dlp-x86_64-pc-windows-msvc.exe"),
+    ];
+
+    for path in &possible_paths {
+        if path.exists() {
+            log::info!("Found yt-dlp at: {:?}", path);
+            return Ok(path.clone());
+        }
+    }
+
+    Err(format!(
+        "yt-dlp not found. CWD: {:?}, Searched in: {:?}",
+        cwd, possible_paths
+    ))
+}

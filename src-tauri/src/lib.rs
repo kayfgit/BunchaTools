@@ -82,6 +82,8 @@ struct AppState {
     tray_handle: Mutex<Option<TrayIcon>>,
     app_ready: Mutex<bool>,
     git_download_cancelled: Mutex<bool>,
+    youtube_download_cancelled: Mutex<bool>,
+    youtube_download_process: Mutex<Option<u32>>, // PID of yt-dlp process
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -1093,6 +1095,34 @@ pub struct GitDownloadResult {
     pub output_path: String,
 }
 
+// YouTube Downloader types and commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YouTubeVideoInfo {
+    pub url: String,
+    pub title: String,
+    pub thumbnail: String,
+    pub duration: u64,
+    pub channel: String,
+    pub is_valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YouTubeDownloadOptions {
+    pub quality: String,  // "best", "4k", "1080p", "720p", "480p", "360p"
+    pub mode: String,     // "video_audio", "audio_only", "video_only"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YouTubeDownloadProgress {
+    pub stage: String,
+    pub percent: f32,
+    pub message: String,
+    pub download_speed: Option<String>,
+    pub eta: Option<String>,
+    pub file_size: Option<String>,
+    pub output_path: Option<String>,
+}
+
 // GitHub Contents API response structure
 #[derive(Debug, Clone, Deserialize)]
 struct GitHubContentItem {
@@ -1768,6 +1798,334 @@ async fn open_folder_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// YouTube Downloader Commands
+
+#[tauri::command]
+async fn get_youtube_video_info(url: String) -> Result<YouTubeVideoInfo, String> {
+    let ytdlp_path = platform::get_ytdlp_path()?;
+
+    log::info!("Running yt-dlp to get video info for: {}", url);
+
+    // Clone URL before moving into closure since we need it for the return value
+    let url_for_command = url.clone();
+
+    // Run the blocking command in a separate thread to avoid blocking the async executor
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        hidden_command(&ytdlp_path)
+            .args([
+                "--dump-json",
+                "--no-download",
+                "--no-warnings",
+                "--socket-timeout", "10",  // 10 second timeout for network operations
+                &url_for_command,
+            ])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        log::error!("yt-dlp failed. Exit code: {:?}, stderr: {}, stdout: {}", output.status.code(), stderr, stdout);
+        if stderr.trim().is_empty() {
+            return Err(format!("yt-dlp failed with exit code {:?}", output.status.code()));
+        }
+        return Err(format!("yt-dlp error: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    log::debug!("yt-dlp output length: {} bytes", stdout.len());
+
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse yt-dlp output: {} (output was {} bytes)", e, stdout.len()))?;
+
+    Ok(YouTubeVideoInfo {
+        url: url.clone(),
+        title: json["title"].as_str().unwrap_or("Unknown").to_string(),
+        thumbnail: json["thumbnail"].as_str().unwrap_or("").to_string(),
+        duration: json["duration"].as_u64().unwrap_or(0),
+        channel: json["channel"].as_str()
+            .or_else(|| json["uploader"].as_str())
+            .unwrap_or("Unknown")
+            .to_string(),
+        is_valid: true,
+    })
+}
+
+fn build_format_selector(quality: &str, mode: &str) -> String {
+    match mode {
+        "audio_only" => "bestaudio[ext=m4a]/bestaudio/best".to_string(),
+        "video_only" => {
+            match quality {
+                "best" => "bestvideo/best".to_string(),
+                "4k" => "bestvideo[height<=2160]/best[height<=2160]".to_string(),
+                "1080p" => "bestvideo[height<=1080]/best[height<=1080]".to_string(),
+                "720p" => "bestvideo[height<=720]/best[height<=720]".to_string(),
+                "480p" => "bestvideo[height<=480]/best[height<=480]".to_string(),
+                "360p" => "bestvideo[height<=360]/best[height<=360]".to_string(),
+                _ => "bestvideo/best".to_string(),
+            }
+        }
+        _ => {
+            // video_audio (default)
+            match quality {
+                "best" => "bestvideo+bestaudio/best".to_string(),
+                "4k" => "bestvideo[height<=2160]+bestaudio/best[height<=2160]".to_string(),
+                "1080p" => "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
+                "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
+                "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
+                "360p" => "bestvideo[height<=360]+bestaudio/best[height<=360]".to_string(),
+                _ => "bestvideo+bestaudio/best".to_string(),
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn download_youtube_video(
+    app: AppHandle,
+    url: String,
+    output_path: String,
+    options: YouTubeDownloadOptions,
+) -> Result<String, String> {
+    // Reset cancellation flag
+    {
+        let state = app.state::<AppState>();
+        *state.youtube_download_cancelled.lock().unwrap() = false;
+        *state.youtube_download_process.lock().unwrap() = None;
+    }
+
+    let ytdlp_path = platform::get_ytdlp_path()?;
+    let format_selector = build_format_selector(&options.quality, &options.mode);
+
+    // Build output template
+    let output_template = PathBuf::from(&output_path)
+        .join("%(title)s.%(ext)s")
+        .to_string_lossy()
+        .to_string();
+
+    // Emit initial progress
+    let _ = app.emit(
+        "youtube-download-progress",
+        YouTubeDownloadProgress {
+            stage: "downloading".to_string(),
+            percent: 0.0,
+            message: "Starting download...".to_string(),
+            download_speed: None,
+            eta: None,
+            file_size: None,
+            output_path: None,
+        },
+    );
+
+    // Build command arguments
+    let mut args = vec![
+        "-f".to_string(),
+        format_selector,
+        "-o".to_string(),
+        output_template,
+        "--newline".to_string(),
+        "--progress".to_string(),
+        "--no-warnings".to_string(),
+    ];
+
+    // Add merge format for video+audio to ensure mp4 output
+    if options.mode == "video_audio" {
+        args.push("--merge-output-format".to_string());
+        args.push("mp4".to_string());
+    }
+
+    // Add audio extraction for audio_only mode
+    if options.mode == "audio_only" {
+        args.push("-x".to_string());
+        args.push("--audio-format".to_string());
+        args.push("mp3".to_string());
+    }
+
+    args.push(url);
+
+    // Spawn the yt-dlp process
+    let mut child = hidden_command(&ytdlp_path)
+        .args(&args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start yt-dlp: {}", e))?;
+
+    // Store the process ID for cancellation
+    {
+        let state = app.state::<AppState>();
+        *state.youtube_download_process.lock().unwrap() = Some(child.id());
+    }
+
+    let stdout = child.stdout.take()
+        .ok_or("Failed to capture stdout")?;
+
+    // Read and parse progress from stdout
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(stdout);
+    let mut final_output_path: Option<String> = None;
+
+    for line in reader.lines() {
+        // Check for cancellation
+        {
+            let state = app.state::<AppState>();
+            if *state.youtube_download_cancelled.lock().unwrap() {
+                let _ = child.kill();
+                return Err("Download cancelled".to_string());
+            }
+        }
+
+        if let Ok(line) = line {
+            // Parse progress line
+            // Format: [download]  45.2% of 245.60MiB at 5.23MiB/s ETA 02:15
+            if line.contains("[download]") && line.contains("%") {
+                let progress = parse_ytdlp_progress(&line);
+                let _ = app.emit("youtube-download-progress", progress);
+            }
+            // Check for destination line
+            // Format: [download] Destination: /path/to/file.mp4
+            else if line.contains("[download] Destination:") {
+                if let Some(path) = line.split("Destination:").nth(1) {
+                    final_output_path = Some(path.trim().to_string());
+                }
+            }
+            // Check for merge line which indicates final file
+            // Format: [Merger] Merging formats into "/path/to/file.mp4"
+            else if line.contains("[Merger] Merging formats into") {
+                if let Some(start) = line.find('"') {
+                    if let Some(end) = line.rfind('"') {
+                        if start < end {
+                            final_output_path = Some(line[start+1..end].to_string());
+                        }
+                    }
+                }
+            }
+            // Check for already downloaded
+            else if line.contains("has already been downloaded") {
+                if let Some(_start) = line.find('[') {
+                    if let Some(path_start) = line.find("] ") {
+                        let path_part = &line[path_start+2..];
+                        if let Some(end) = path_part.find(" has already") {
+                            final_output_path = Some(path_part[..end].to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Wait for process to complete
+    let status = child.wait()
+        .map_err(|e| format!("Failed to wait for yt-dlp: {}", e))?;
+
+    // Clear the process ID
+    {
+        let state = app.state::<AppState>();
+        *state.youtube_download_process.lock().unwrap() = None;
+    }
+
+    if !status.success() {
+        return Err("Download failed".to_string());
+    }
+
+    // Emit completion
+    let result_path = final_output_path.clone().unwrap_or_else(|| output_path.clone());
+    let _ = app.emit(
+        "youtube-download-progress",
+        YouTubeDownloadProgress {
+            stage: "complete".to_string(),
+            percent: 100.0,
+            message: "Download complete!".to_string(),
+            download_speed: None,
+            eta: None,
+            file_size: None,
+            output_path: Some(result_path.clone()),
+        },
+    );
+
+    Ok(result_path)
+}
+
+fn parse_ytdlp_progress(line: &str) -> YouTubeDownloadProgress {
+    // Parse: [download]  45.2% of 245.60MiB at 5.23MiB/s ETA 02:15
+    let mut percent: f32 = 0.0;
+    let mut file_size: Option<String> = None;
+    let mut download_speed: Option<String> = None;
+    let mut eta: Option<String> = None;
+
+    // Extract percentage
+    if let Some(pct_idx) = line.find('%') {
+        let start = line[..pct_idx].rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
+        if let Ok(p) = line[start..pct_idx].trim().parse::<f32>() {
+            percent = p;
+        }
+    }
+
+    // Extract file size (after "of ")
+    if let Some(of_idx) = line.find(" of ") {
+        let size_start = of_idx + 4;
+        if let Some(at_idx) = line[size_start..].find(" at ") {
+            file_size = Some(line[size_start..size_start + at_idx].trim().to_string());
+        }
+    }
+
+    // Extract speed (after "at ")
+    if let Some(at_idx) = line.find(" at ") {
+        let speed_start = at_idx + 4;
+        if let Some(eta_idx) = line[speed_start..].find(" ETA ") {
+            download_speed = Some(line[speed_start..speed_start + eta_idx].trim().to_string());
+        } else {
+            // No ETA, speed goes to end
+            let end = line[speed_start..].find(char::is_whitespace)
+                .map(|i| speed_start + i)
+                .unwrap_or(line.len());
+            download_speed = Some(line[speed_start..end].trim().to_string());
+        }
+    }
+
+    // Extract ETA (after "ETA ")
+    if let Some(eta_idx) = line.find(" ETA ") {
+        eta = Some(line[eta_idx + 5..].trim().to_string());
+    }
+
+    YouTubeDownloadProgress {
+        stage: "downloading".to_string(),
+        percent,
+        message: format!("Downloading... {:.1}%", percent),
+        download_speed,
+        eta,
+        file_size,
+        output_path: None,
+    }
+}
+
+#[tauri::command]
+async fn cancel_youtube_download(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    *state.youtube_download_cancelled.lock().unwrap() = true;
+
+    // Try to kill the process if it exists
+    if let Some(pid) = *state.youtube_download_process.lock().unwrap() {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output();
+        }
+    }
+
+    Ok(())
+}
+
 fn toggle_window(app: &AppHandle) {
     // Don't toggle until the app is fully initialized
     let state = app.state::<AppState>();
@@ -1834,6 +2192,8 @@ pub fn run() {
             tray_handle: Mutex::new(None),
             app_ready: Mutex::new(false),
             git_download_cancelled: Mutex::new(false),
+            youtube_download_cancelled: Mutex::new(false),
+            youtube_download_process: Mutex::new(None),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -2003,7 +2363,10 @@ pub fn run() {
             convert_video,
             download_github_folder,
             cancel_git_download,
-            open_folder_in_explorer
+            open_folder_in_explorer,
+            get_youtube_video_info,
+            download_youtube_video,
+            cancel_youtube_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

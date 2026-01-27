@@ -90,7 +90,7 @@ npm run tauri build
 
 # Platform Support
 
-Currently Windows only. Linux and macOS support may be added in future updates.
+Currently Windows focused but works on some Linux systems. MacOS support may be added in future updates.
 
 ---
 

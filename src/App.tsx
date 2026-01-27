@@ -18,6 +18,7 @@ import {
   Braces,
   Palette,
   GitBranch,
+  Youtube,
 } from "lucide-react";
 import QRCodeLib from "qrcode";
 
@@ -38,6 +39,10 @@ import type {
   GitDownloadOptions,
   GitDownloadProgress,
   GitDownloadResult,
+  YouTubeVideoInfo,
+  YouTubeDownloadOptions,
+  YouTubeDownloadProgress,
+  YouTubeUrlInfo,
 } from "./types";
 
 // Import constants
@@ -55,6 +60,7 @@ import {
   parseColorQuery,
   rgbToHex,
   parseGitHubUrl,
+  parseYouTubeUrl,
 } from "./utils";
 
 // Import components
@@ -68,6 +74,7 @@ import {
   QRGenerator,
   RegexTester,
   GitDownloader,
+  YouTubeDownloader,
 } from "./components";
 
 function App() {
@@ -179,6 +186,23 @@ function App() {
     percent: 0,
     message: '',
   });
+
+  // YouTube Downloader state
+  const [showYouTubeDownloader, setShowYouTubeDownloader] = useState(false);
+  const [ytUrlInput, setYtUrlInput] = useState("");
+  const [ytParsedUrl, setYtParsedUrl] = useState<YouTubeUrlInfo | null>(null);
+  const [ytVideoInfo, setYtVideoInfo] = useState<YouTubeVideoInfo | null>(null);
+  const [ytDownloadPath, setYtDownloadPath] = useState("");
+  const [ytDownloadOptions, setYtDownloadOptions] = useState<YouTubeDownloadOptions>({
+    quality: 'best',
+    mode: 'video_audio',
+  });
+  const [ytProgress, setYtProgress] = useState<YouTubeDownloadProgress>({
+    stage: 'idle',
+    percent: 0,
+    message: '',
+  });
+  const [ytValidationError, setYtValidationError] = useState<string | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -322,6 +346,31 @@ function App() {
       },
     },
     {
+      id: "youtube-downloader",
+      name: "YouTube Downloader",
+      description: "Download videos from YouTube",
+      icon: Youtube,
+      keywords: ["youtube", "video", "download", "yt", "music", "audio", "stream", "mp3", "mp4"],
+      action: async () => {
+        await invoke("set_auto_hide", { enabled: true });
+        setShowYouTubeDownloader(true);
+        setYtUrlInput("");
+        setYtParsedUrl(null);
+        setYtVideoInfo(null);
+        setYtDownloadPath("");
+        setYtDownloadOptions({
+          quality: 'best',
+          mode: 'video_audio',
+        });
+        setYtProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+        setQuery("");
+      },
+    },
+    {
       id: "settings",
       name: "Settings",
       description: "Configure BunchaTools preferences",
@@ -438,6 +487,17 @@ function App() {
   useEffect(() => {
     const unlisten = listen<GitDownloadProgress>("git-download-progress", (event) => {
       setGitProgress(event.payload);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Listen for YouTube download progress events
+  useEffect(() => {
+    const unlisten = listen<YouTubeDownloadProgress>("youtube-download-progress", (event) => {
+      setYtProgress(event.payload);
     });
 
     return () => {
@@ -791,10 +851,12 @@ function App() {
       return { width: 1000, minHeight: 400, maxHeight: 700 };
     } else if (showGitDownloader) {
       return { width: 720, minHeight: 350, maxHeight: 720 };
+    } else if (showYouTubeDownloader) {
+      return { width: 720, minHeight: 400, maxHeight: 800 };
     }
     // Command palette
     return { width: 680, minHeight: 200, maxHeight: 550 };
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader, showYouTubeDownloader]);
 
   // Auto-resize window based on content
   const { contentRef } = useWindowAutoSize<HTMLDivElement>({
@@ -817,7 +879,7 @@ function App() {
     if (e.key === "Escape") return;
 
     // Handle navigation only in command palette mode
-    if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester && !showGitDownloader) {
+    if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester && !showGitDownloader && !showYouTubeDownloader) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) =>
@@ -1129,6 +1191,25 @@ function App() {
             message: '',
           });
         }
+      } else if (showYouTubeDownloader) {
+        // Don't reset if download is actively in progress
+        const isDownloading = ytProgress.stage === 'downloading';
+        if (!isDownloading) {
+          setShowYouTubeDownloader(false);
+          setYtUrlInput("");
+          setYtParsedUrl(null);
+          setYtVideoInfo(null);
+          setYtDownloadPath("");
+          setYtDownloadOptions({
+            quality: 'best',
+            mode: 'video_audio',
+          });
+          setYtProgress({
+            stage: 'idle',
+            percent: 0,
+            message: '',
+          });
+        }
       } else {
         // No panel open - hide the window
         await invoke("hide_window");
@@ -1138,7 +1219,7 @@ function App() {
 
     window.addEventListener("keydown", handleGlobalEscape);
     return () => window.removeEventListener("keydown", handleGlobalEscape);
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, gitProgress.stage, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, showYouTubeDownloader, gitProgress.stage, ytProgress.stage, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
 
   // Color picker blur handler
   useEffect(() => {
@@ -1263,10 +1344,44 @@ function App() {
     };
   }, [showGitDownloader, gitProgress.stage]);
 
+  // YouTube Downloader blur handler
+  // Don't reset if download is in progress - keep state so user can return to see progress
+  useEffect(() => {
+    if (!showYouTubeDownloader) return;
+
+    const handleBlur = () => {
+      // Don't reset if download is actively in progress
+      const isDownloading = ytProgress.stage === 'downloading';
+
+      if (!isDraggingRef.current && !isDialogOpenRef.current && !isDownloading) {
+        setShowYouTubeDownloader(false);
+        setYtUrlInput("");
+        setYtParsedUrl(null);
+        setYtVideoInfo(null);
+        setYtDownloadPath("");
+        setYtDownloadOptions({
+          quality: 'best',
+          mode: 'video_audio',
+        });
+        setYtProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [showYouTubeDownloader, ytProgress.stage]);
+
   // Command palette blur handler (hides window on blur)
   useEffect(() => {
     // Only handle blur when command palette is visible (no other panel is open)
-    const isCommandPaletteVisible = !showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader;
+    const isCommandPaletteVisible = !showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader && !showYouTubeDownloader;
     if (!isCommandPaletteVisible) return;
 
     const handleBlur = async () => {
@@ -1280,7 +1395,7 @@ function App() {
     return () => {
       window.removeEventListener("blur", handleBlur);
     };
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, showYouTubeDownloader]);
 
   // Port killer functions
   const handleScanPort = async (port: number) => {
@@ -1610,6 +1725,161 @@ function App() {
     });
   };
 
+  // YouTube Downloader handlers - synchronous URL change handler
+  const handleYtUrlChange = (url: string) => {
+    setYtUrlInput(url);
+    const parsed = parseYouTubeUrl(url);
+    setYtParsedUrl(parsed);
+    setYtValidationError(null);
+    // Clear video info immediately when URL changes
+    if (!parsed?.isValid) {
+      setYtVideoInfo(null);
+    }
+  };
+
+  // Debounced YouTube video info fetching
+  useEffect(() => {
+    // Clear video info and reset state when URL becomes invalid
+    if (!showYouTubeDownloader || !ytParsedUrl || !ytParsedUrl.isValid) {
+      return;
+    }
+
+    // Set validating state immediately
+    setYtProgress({
+      stage: 'validating',
+      percent: 0,
+      message: 'Fetching video info...',
+    });
+
+    // Capture the current URL for the async operation
+    const urlToFetch = ytUrlInput;
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const info = await invoke<YouTubeVideoInfo>("get_youtube_video_info", { url: urlToFetch });
+        setYtVideoInfo(info);
+        setYtProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+      } catch (e) {
+        setYtVideoInfo(null);
+        setYtValidationError(e instanceof Error ? e.message : String(e));
+        setYtProgress({
+          stage: 'idle',
+          percent: 0,
+          message: '',
+        });
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [showYouTubeDownloader, ytUrlInput, ytParsedUrl]);
+
+  const handleYtPaste = async () => {
+    try {
+      const clipboardText = await readText();
+      if (clipboardText) {
+        handleYtUrlChange(clipboardText);
+      }
+    } catch (e) {
+      console.error("Failed to read clipboard:", e);
+    }
+  };
+
+  const handleYtSelectFolder = async () => {
+    isDialogOpenRef.current = true;
+    await invoke("set_auto_hide", { enabled: false });
+
+    const result = await open({
+      directory: true,
+      multiple: false,
+    });
+
+    await invoke("set_auto_hide", { enabled: true });
+    isDialogOpenRef.current = false;
+
+    if (result) {
+      setYtDownloadPath(result as string);
+    }
+  };
+
+  const handleYtDownload = async () => {
+    if (!ytParsedUrl?.isValid || !ytDownloadPath) return;
+
+    setYtProgress({
+      stage: 'downloading',
+      percent: 0,
+      message: 'Starting download...',
+    });
+
+    try {
+      await invoke<string>("download_youtube_video", {
+        url: ytUrlInput,
+        outputPath: ytDownloadPath,
+        options: {
+          quality: ytDownloadOptions.quality,
+          mode: ytDownloadOptions.mode,
+        },
+      });
+      // Progress updates come via events, completion is handled there
+    } catch (e) {
+      setYtProgress({
+        stage: 'error',
+        percent: 0,
+        message: '',
+        errorMessage: String(e),
+      });
+    }
+  };
+
+  const handleYtOpenFolder = async () => {
+    const path = ytProgress.outputPath || ytDownloadPath;
+    if (path) {
+      try {
+        // Get directory from file path
+        const dirPath = path.includes('\\') || path.includes('/')
+          ? path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')))
+          : path;
+        await invoke("open_folder_in_explorer", { path: dirPath || path });
+      } catch (e) {
+        console.error("Failed to open folder:", e);
+      }
+    }
+  };
+
+  const handleYtCancel = async () => {
+    try {
+      await invoke("cancel_youtube_download");
+    } catch (e) {
+      // Ignore errors
+    }
+    setYtProgress({
+      stage: 'idle',
+      percent: 0,
+      message: '',
+    });
+  };
+
+  const handleYtReset = async () => {
+    await handleYtCancel();
+    setYtUrlInput("");
+    setYtParsedUrl(null);
+    setYtVideoInfo(null);
+    setYtValidationError(null);
+    setYtDownloadPath("");
+    setYtDownloadOptions({
+      quality: 'best',
+      mode: 'video_audio',
+    });
+    setYtProgress({
+      stage: 'idle',
+      percent: 0,
+      message: '',
+    });
+  };
+
   return (
     <div
       ref={contentRef}
@@ -1617,7 +1887,7 @@ function App() {
       spellCheck={false}
     >
       {/* Command Palette - Hidden when tools are open */}
-      {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader && (
+      {!showVideoConverter && !showPortKiller && !showTranslation && !showSettings && !showColorPicker && !showQRGenerator && !showRegexTester && !showGitDownloader && !showYouTubeDownloader && (
         <CommandPalette
           query={query}
           setQuery={setQuery}
@@ -1784,6 +2054,28 @@ function App() {
           onDownload={handleGitDownload}
           onOpenFolder={handleGitOpenFolder}
           onReset={handleGitReset}
+          onDragStart={handleDragStart}
+        />
+      )}
+
+      {/* YouTube Downloader Panel */}
+      {showYouTubeDownloader && (
+        <YouTubeDownloader
+          urlInput={ytUrlInput}
+          setUrlInput={handleYtUrlChange}
+          parsedUrl={ytParsedUrl}
+          videoInfo={ytVideoInfo}
+          downloadPath={ytDownloadPath}
+          options={ytDownloadOptions}
+          setOptions={setYtDownloadOptions}
+          progress={ytProgress}
+          validationError={ytValidationError}
+          onPaste={handleYtPaste}
+          onSelectFolder={handleYtSelectFolder}
+          onDownload={handleYtDownload}
+          onOpenFolder={handleYtOpenFolder}
+          onCancel={handleYtCancel}
+          onReset={handleYtReset}
           onDragStart={handleDragStart}
         />
       )}

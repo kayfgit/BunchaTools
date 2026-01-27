@@ -7,3 +7,4 @@ export { ColorPickerPanel } from './ColorPickerPanel';
 export { QRGenerator } from './QRGenerator';
 export { RegexTester } from './RegexTester';
 export { GitDownloader } from './GitDownloader';
+export { YouTubeDownloader } from './YouTubeDownloader';

@@ -13,8 +13,13 @@ import {
   Film,
   Clapperboard,
   Settings2,
+  Monitor,
+  Smartphone,
+  Video,
+  Music,
+  FileVideo,
 } from "lucide-react";
-import type { QRCodeType, QRCodeData, UnitCategory, VideoFormat, VideoQualityPreset } from "./types";
+import type { QRCodeType, QRCodeData, UnitCategory, VideoFormat, VideoQualityPreset, YouTubeQuality, YouTubeDownloadMode } from "./types";
 
 // Video Converter Constants
 export const VIDEO_FORMATS: VideoFormat[] = [
@@ -219,3 +224,19 @@ export const CURRENCY_ALIASES: Record<string, string> = {
   dkk: "DKK", pln: "PLN", czk: "CZK", huf: "HUF", ils: "ILS",
   thb: "THB", myr: "MYR", php: "PHP", idr: "IDR",
 };
+
+// YouTube Downloader Constants
+export const YOUTUBE_QUALITY_OPTIONS: { id: YouTubeQuality; label: string; description: string; icon: LucideIcon }[] = [
+  { id: 'best', label: 'Best', description: 'Highest available', icon: Sparkles },
+  { id: '4k', label: '4K', description: '2160p Ultra HD', icon: Monitor },
+  { id: '1080p', label: '1080p', description: 'Full HD', icon: Zap },
+  { id: '720p', label: '720p', description: 'HD', icon: Film },
+  { id: '480p', label: '480p', description: 'Standard', icon: Clapperboard },
+  { id: '360p', label: '360p', description: 'Low', icon: Smartphone },
+];
+
+export const YOUTUBE_DOWNLOAD_MODES: { id: YouTubeDownloadMode; label: string; description: string; icon: LucideIcon }[] = [
+  { id: 'video_audio', label: 'Video + Audio', description: 'Full video with sound', icon: Video },
+  { id: 'audio_only', label: 'Audio Only', description: 'Extract audio (MP3)', icon: Music },
+  { id: 'video_only', label: 'Video Only', description: 'Video without audio', icon: FileVideo },
+];

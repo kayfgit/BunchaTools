@@ -7,6 +7,7 @@ import type {
   QRCodeType,
   QRCodeData,
   GitHubUrlInfo,
+  YouTubeUrlInfo,
 } from "./types";
 import { UNIT_CATEGORIES, DEFAULT_UNIT_TARGETS, CURRENCY_ALIASES } from "./constants";
 
@@ -959,4 +960,45 @@ export function parseGitHubUrl(url: string): GitHubUrlInfo | null {
 export function formatGitHubPath(path: string): string {
   if (!path) return '/ (entire repository)';
   return '/' + path;
+}
+
+// ============ YouTube URL Utilities ============
+
+export function parseYouTubeUrl(url: string): YouTubeUrlInfo | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  // Pattern 1: Standard watch URL
+  // https://www.youtube.com/watch?v=VIDEO_ID or https://youtube.com/watch?v=VIDEO_ID
+  const watchPattern = /^https?:\/\/(?:www\.)?youtube\.com\/watch\?(?:.*&)?v=([a-zA-Z0-9_-]{11})/;
+  const watchMatch = trimmed.match(watchPattern);
+  if (watchMatch) {
+    return { videoId: watchMatch[1], isValid: true, originalUrl: trimmed };
+  }
+
+  // Pattern 2: Short URL
+  // https://youtu.be/VIDEO_ID
+  const shortPattern = /^https?:\/\/youtu\.be\/([a-zA-Z0-9_-]{11})/;
+  const shortMatch = trimmed.match(shortPattern);
+  if (shortMatch) {
+    return { videoId: shortMatch[1], isValid: true, originalUrl: trimmed };
+  }
+
+  // Pattern 3: Embed URL
+  // https://www.youtube.com/embed/VIDEO_ID
+  const embedPattern = /^https?:\/\/(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/;
+  const embedMatch = trimmed.match(embedPattern);
+  if (embedMatch) {
+    return { videoId: embedMatch[1], isValid: true, originalUrl: trimmed };
+  }
+
+  // Pattern 4: Shorts URL
+  // https://www.youtube.com/shorts/VIDEO_ID
+  const shortsPattern = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/;
+  const shortsMatch = trimmed.match(shortsPattern);
+  if (shortsMatch) {
+    return { videoId: shortsMatch[1], isValid: true, originalUrl: trimmed };
+  }
+
+  return null;
 }
