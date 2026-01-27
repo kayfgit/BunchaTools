@@ -26,6 +26,20 @@ fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     cmd
 }
 
+// Path alias for learned locations (zoxide-like)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathAlias {
+    pub alias: String,      // lowercase keyword, e.g., "videos"
+    pub path: String,       // full path, e.g., "D:\Videos"
+    pub use_count: u32,     // frequency
+    pub last_used: u64,     // timestamp in seconds
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PathAliases {
+    pub aliases: Vec<PathAlias>,
+}
+
 // Settings structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -110,6 +124,31 @@ fn load_settings(app: &AppHandle) -> Settings {
 fn save_settings_to_file(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     let path = get_settings_path(app);
     let content = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(path, content).map_err(|e| e.to_string())
+}
+
+// Path aliases functions
+fn get_aliases_path(app: &AppHandle) -> PathBuf {
+    let app_data = app.path().app_data_dir().unwrap();
+    fs::create_dir_all(&app_data).unwrap_or_default();
+    app_data.join("path_aliases.json")
+}
+
+fn load_path_aliases(app: &AppHandle) -> PathAliases {
+    let path = get_aliases_path(app);
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(aliases) = serde_json::from_str(&content) {
+                return aliases;
+            }
+        }
+    }
+    PathAliases::default()
+}
+
+fn save_path_aliases(app: &AppHandle, aliases: &PathAliases) -> Result<(), String> {
+    let path = get_aliases_path(app);
+    let content = serde_json::to_string_pretty(aliases).map_err(|e| e.to_string())?;
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
@@ -1783,6 +1822,88 @@ fn get_downloads_path(app: AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Could not find downloads directory: {}", e))
 }
 
+/// Learn a path alias from a full path (extracts folder name as alias)
+#[tauri::command]
+fn learn_path_alias(app: AppHandle, path: String) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Verify path exists
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+
+    // Extract the last folder name as alias
+    let alias = path_buf
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_lowercase())
+        .ok_or_else(|| "Could not extract folder name".to_string())?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let mut aliases = load_path_aliases(&app);
+
+    // Check if alias already exists
+    if let Some(existing) = aliases.aliases.iter_mut().find(|a| a.alias == alias) {
+        // Update existing alias
+        existing.path = path.clone();
+        existing.use_count += 1;
+        existing.last_used = now;
+    } else {
+        // Add new alias
+        aliases.aliases.push(PathAlias {
+            alias: alias.clone(),
+            path: path.clone(),
+            use_count: 1,
+            last_used: now,
+        });
+    }
+
+    save_path_aliases(&app, &aliases)?;
+    Ok(alias)
+}
+
+/// Resolve an alias to a full path
+#[tauri::command]
+fn resolve_path_alias(app: AppHandle, alias: String) -> Result<Option<String>, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let alias_lower = alias.to_lowercase();
+    let mut aliases = load_path_aliases(&app);
+
+    // Find matching alias
+    if let Some(entry) = aliases.aliases.iter_mut().find(|a| a.alias == alias_lower) {
+        // Update usage stats
+        entry.use_count += 1;
+        entry.last_used = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let path = entry.path.clone();
+        save_path_aliases(&app, &aliases)?;
+
+        // Verify path still exists
+        if PathBuf::from(&path).exists() {
+            return Ok(Some(path));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Check if a string looks like a full path
+#[tauri::command]
+fn is_valid_path(path: String) -> bool {
+    let path_buf = PathBuf::from(&path);
+    // Check if it's an absolute path or contains path separators
+    path_buf.is_absolute() || path.contains('\\') || path.contains('/')
+}
+
 #[tauri::command]
 async fn open_folder_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -2378,6 +2499,9 @@ pub fn run() {
             download_github_folder,
             cancel_git_download,
             get_downloads_path,
+            learn_path_alias,
+            resolve_path_alias,
+            is_valid_path,
             open_folder_in_explorer,
             get_youtube_video_info,
             download_youtube_video,

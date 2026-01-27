@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Search,
   Loader2,
@@ -12,7 +12,7 @@ import type { Tool, QuickResult } from "../types";
 
 export interface CommandStatus {
   message: string;
-  type: 'idle' | 'progress' | 'success' | 'error';
+  type: 'idle' | 'progress' | 'success' | 'error' | 'help';
 }
 
 interface CommandPaletteProps {
@@ -25,6 +25,7 @@ interface CommandPaletteProps {
   currencyLoading: boolean;
   commandOnlyMode: boolean;
   commandStatus: CommandStatus;
+  calcResult: string | null;
   onToolExecute: (tool: Tool) => Promise<void>;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onOpenSettings: () => void;
@@ -43,6 +44,7 @@ export function CommandPalette({
   currencyLoading,
   commandOnlyMode,
   commandStatus,
+  calcResult,
   onToolExecute,
   onKeyDown,
   onOpenSettings,
@@ -53,6 +55,17 @@ export function CommandPalette({
   // In command only mode, never show tool suggestions - only the command input
   const isExpanded = !commandOnlyMode;
   const [copied, setCopied] = useState(false);
+  const textMeasureRef = useRef<HTMLSpanElement>(null);
+  const [inputTextWidth, setInputTextWidth] = useState(0);
+
+  // Measure input text width for calculator result positioning
+  useEffect(() => {
+    if (textMeasureRef.current && commandOnlyMode && query) {
+      setInputTextWidth(textMeasureRef.current.offsetWidth);
+    } else {
+      setInputTextWidth(0);
+    }
+  }, [query, commandOnlyMode]);
 
   // Reset copied state when quickResult changes
   useEffect(() => {
@@ -78,6 +91,8 @@ export function CommandPalette({
         return "text-buncha-text placeholder-green-500";
       case 'error':
         return "text-buncha-text placeholder-red-500";
+      case 'help':
+        return "text-buncha-text placeholder-cyan-400";
       default:
         return "text-buncha-text placeholder-buncha-text-muted";
     }
@@ -97,16 +112,34 @@ export function CommandPalette({
             <Search className="w-5 h-5 text-buncha-text-muted" />
           )}
         </div>
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={getCommandPlaceholder()}
-          className={`ml-15 ${commandOnlyMode ? 'w-[580px]' : 'w-145'} py-1 bg-transparent text-lg outline-none ${getCommandPlaceholderClass()}`}
-          autoFocus
-        />
+        <div className="ml-15 relative">
+          {/* Hidden span to measure text width */}
+          <span
+            ref={textMeasureRef}
+            className="absolute invisible whitespace-pre text-lg"
+            aria-hidden="true"
+          >
+            {query}
+          </span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={getCommandPlaceholder()}
+            className={`w-145 py-1 bg-transparent text-lg outline-none ${getCommandPlaceholderClass()}`}
+            autoFocus
+          />
+          {commandOnlyMode && calcResult && query && (
+            <span
+              className="absolute top-1/2 -translate-y-1/2 text-lg text-buncha-text-muted pointer-events-none"
+              style={{ left: `${inputTextWidth + 8}px` }}
+            >
+              = {calcResult}
+            </span>
+          )}
+        </div>
         {commandOnlyMode && (
           <button
             onClick={onOpenSettings}

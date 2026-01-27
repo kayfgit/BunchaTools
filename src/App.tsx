@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { downloadDir } from "@tauri-apps/api/path";
 import { useWindowAutoSize } from "./hooks";
@@ -213,6 +213,9 @@ function App() {
     type: 'idle',
   });
   const commandStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [lastResultPath, setLastResultPath] = useState<string | null>(null);
 
   // Define tools
   const tools: Tool[] = [
@@ -521,12 +524,19 @@ function App() {
   useEffect(() => {
     const unlisten = listen<YouTubeDownloadProgress>("youtube-download-progress", (event) => {
       setYtProgress(event.payload);
+      // Also update command status if in command-only mode and downloading
+      if (settings.command_only_mode && event.payload.stage === 'downloading') {
+        setCommandStatus({
+          message: `Downloading... ${Math.round(event.payload.percent)}%`,
+          type: 'progress',
+        });
+      }
     });
 
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [settings.command_only_mode]);
 
   // Keep ref in sync with git download status
   useEffect(() => {
@@ -534,6 +544,13 @@ function App() {
                                 gitProgress.stage === 'downloading' ||
                                 gitProgress.stage === 'extracting';
   }, [gitProgress.stage]);
+
+  // Clear help status when user starts typing in command-only mode
+  useEffect(() => {
+    if (settings.command_only_mode && query.length > 0 && commandStatus.type === 'help') {
+      setCommandStatus({ message: "Type a command...", type: 'idle' });
+    }
+  }, [query, settings.command_only_mode, commandStatus.type]);
 
   useEffect(() => {
     const unlisten = listen("focus-search", async () => {
@@ -859,6 +876,12 @@ function App() {
     }
   }, [selectedIndex]);
 
+  // Calculate math expression result for command-only mode
+  const calcResult = useMemo(() => {
+    if (!settings.command_only_mode || !query.trim()) return null;
+    return evaluateExpression(query);
+  }, [settings.command_only_mode, query]);
+
   // Window size configuration based on active view
   // In command only mode, window always stays compact (no tool list shown)
   const isCommandOnlyCollapsed = settings.command_only_mode;
@@ -911,13 +934,48 @@ function App() {
 
     // Handle navigation only in command palette mode
     if (!showSettings && !showVideoConverter && !showPortKiller && !showTranslation && !showQRGenerator && !showRegexTester && !showGitDownloader && !showYouTubeDownloader) {
-      // Command-only mode: execute command on Enter
+      // Command-only mode: handle Enter and history navigation
       if (settings.command_only_mode) {
         if (e.key === "Enter" && query.trim()) {
           e.preventDefault();
-          const commandToExecute = query;
-          setQuery(""); // Clear input immediately
-          await executeCommand(commandToExecute);
+          // If there's a calculator result, copy it to clipboard
+          if (calcResult) {
+            try {
+              await writeText(calcResult);
+              setQuery("");
+              setCommandStatus({ message: `Copied ${calcResult}`, type: 'success' });
+              if (commandStatusTimeoutRef.current) {
+                clearTimeout(commandStatusTimeoutRef.current);
+              }
+              commandStatusTimeoutRef.current = setTimeout(() => {
+                setCommandStatus({ message: "Type a command...", type: 'idle' });
+              }, 1500);
+            } catch (err) {
+              console.error("Failed to copy:", err);
+            }
+          } else {
+            // Otherwise execute as command
+            const commandToExecute = query;
+            setQuery(""); // Clear input immediately
+            await executeCommand(commandToExecute);
+          }
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (commandHistory.length > 0) {
+            const newIndex = historyIndex < commandHistory.length - 1 ? historyIndex + 1 : historyIndex;
+            setHistoryIndex(newIndex);
+            setQuery(commandHistory[newIndex] || "");
+          }
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (historyIndex > 0) {
+            const newIndex = historyIndex - 1;
+            setHistoryIndex(newIndex);
+            setQuery(commandHistory[newIndex] || "");
+          } else if (historyIndex === 0) {
+            setHistoryIndex(-1);
+            setQuery("");
+          }
         }
         return;
       }
@@ -1773,6 +1831,49 @@ function App() {
     });
   };
 
+  // Command-only mode: Helper to resolve destination (full path or alias)
+  const resolveDestination = async (destination: string): Promise<{ path: string; learned: boolean } | null> => {
+    // Check if it looks like a full path
+    const isFullPath = await invoke<boolean>("is_valid_path", { path: destination });
+
+    if (isFullPath) {
+      // It's a full path - learn it as an alias for future use
+      try {
+        await invoke<string>("learn_path_alias", { path: destination });
+      } catch (e) {
+        // Path might not exist yet, that's ok
+      }
+      return { path: destination, learned: true };
+    }
+
+    // Try to resolve as an alias
+    const resolved = await invoke<string | null>("resolve_path_alias", { alias: destination });
+    if (resolved) {
+      return { path: resolved, learned: false };
+    }
+
+    return null;
+  };
+
+  // Command-only mode: Helper to show error and reset
+  const showCommandError = (message: string) => {
+    setCommandStatus({ message, type: 'error' });
+    commandStatusTimeoutRef.current = setTimeout(() => {
+      setCommandStatus({ message: "Type a command...", type: 'idle' });
+    }, 1500);
+  };
+
+  // Command-only mode: Helper to show success and reset
+  const showCommandSuccess = (message: string, resultPath?: string) => {
+    if (resultPath) {
+      setLastResultPath(resultPath);
+    }
+    setCommandStatus({ message, type: 'success' });
+    commandStatusTimeoutRef.current = setTimeout(() => {
+      setCommandStatus({ message: "Type a command...", type: 'idle' });
+    }, 1500);
+  };
+
   // Command-only mode: Execute command from natural language input
   const executeCommand = async (input: string) => {
     // Clear any existing timeout
@@ -1781,30 +1882,121 @@ function App() {
       commandStatusTimeoutRef.current = null;
     }
 
-    // Parse "download <github-url>" command
-    const downloadMatch = input.match(/^download\s+(https?:\/\/github\.com\/[^\s]+)/i);
-    if (downloadMatch) {
-      const url = downloadMatch[1];
-      const parsed = parseGitHubUrl(url);
+    // Add to history (avoid duplicates of last command)
+    const trimmedInput = input.trim();
+    if (trimmedInput && (commandHistory.length === 0 || commandHistory[0] !== trimmedInput)) {
+      setCommandHistory(prev => [trimmedInput, ...prev].slice(0, 50)); // Keep last 50 commands
+    }
+    setHistoryIndex(-1);
 
+    // Normalize command: expand shortcuts
+    let normalizedInput = trimmedInput;
+    if (normalizedInput.match(/^dl\s/i)) {
+      normalizedInput = normalizedInput.replace(/^dl\s/i, 'download ');
+    }
+    if (normalizedInput.match(/^op\s/i) || normalizedInput.match(/^op$/i)) {
+      normalizedInput = normalizedInput.replace(/^op(\s|$)/i, 'open$1');
+    }
+
+    // === HELP COMMAND ===
+    if (normalizedInput.match(/^(help|\?)$/i)) {
+      setCommandStatus({
+        message: "dl <url> [to <dest>] | yt <url> [to <dest>] | open [<path>] | ? for help",
+        type: 'help',
+      });
+      // Help doesn't auto-dismiss - user types to clear
+      return;
+    }
+
+    // === OPEN COMMAND ===
+    // "open" or "open <alias/path>"
+    const openMatch = normalizedInput.match(/^open(?:\s+(.+))?$/i);
+    if (openMatch) {
+      const target = openMatch[1]?.trim();
+
+      let pathToOpen: string | null = null;
+
+      if (!target) {
+        // No target - use last result path
+        if (lastResultPath) {
+          pathToOpen = lastResultPath;
+        } else {
+          showCommandError("No recent path to open");
+          return;
+        }
+      } else {
+        // Resolve the target
+        const resolved = await resolveDestination(target);
+        if (resolved) {
+          pathToOpen = resolved.path;
+        } else {
+          showCommandError(`Unknown location: ${target}`);
+          return;
+        }
+      }
+
+      try {
+        await invoke("open_folder_in_explorer", { path: pathToOpen });
+        showCommandSuccess(`Opened ${pathToOpen}`, pathToOpen);
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // === DOWNLOAD COMMAND (GitHub) ===
+    // "download <url> [to <destination>]" or "download clipboard [to <destination>]"
+    const downloadMatch = normalizedInput.match(/^download\s+(\S+)(?:\s+to\s+(.+))?$/i);
+    if (downloadMatch) {
+      let url = downloadMatch[1];
+      const destination = downloadMatch[2]?.trim();
+
+      // Handle "clipboard" keyword
+      if (url.toLowerCase() === 'clipboard') {
+        try {
+          const clipboardText = await readText();
+          if (!clipboardText) {
+            showCommandError("Clipboard is empty");
+            return;
+          }
+          url = clipboardText.trim();
+        } catch (e) {
+          showCommandError("Could not read clipboard");
+          return;
+        }
+      }
+
+      // Check if it's a GitHub URL
+      const parsed = parseGitHubUrl(url);
       if (!parsed || !parsed.isValid) {
-        setCommandStatus({ message: "Invalid GitHub URL", type: 'error' });
-        commandStatusTimeoutRef.current = setTimeout(() => {
-          setCommandStatus({ message: "Type a command...", type: 'idle' });
-        }, 1000);
+        // Maybe it's a YouTube URL? Redirect to yt command
+        const ytParsed = parseYouTubeUrl(url);
+        if (ytParsed?.isValid) {
+          // Redirect to YouTube download
+          await executeCommand(`yt ${url}${destination ? ` to ${destination}` : ''}`);
+          return;
+        }
+        showCommandError("Invalid GitHub URL");
         return;
       }
 
-      // Get downloads directory
-      let downloadsPath: string;
-      try {
-        downloadsPath = await invoke<string>("get_downloads_path");
-      } catch (e) {
-        setCommandStatus({ message: "Could not find Downloads folder", type: 'error' });
-        commandStatusTimeoutRef.current = setTimeout(() => {
-          setCommandStatus({ message: "Type a command...", type: 'idle' });
-        }, 1000);
-        return;
+      // Resolve destination path
+      let outputPath: string;
+      if (destination) {
+        const resolved = await resolveDestination(destination);
+        if (resolved) {
+          outputPath = resolved.path;
+        } else {
+          showCommandError(`Unknown location: ${destination}`);
+          return;
+        }
+      } else {
+        try {
+          outputPath = await invoke<string>("get_downloads_path");
+        } catch (e) {
+          showCommandError("Could not find Downloads folder");
+          return;
+        }
       }
 
       // Start download
@@ -1818,7 +2010,7 @@ function App() {
             branch: parsed.branch,
             path: parsed.path,
           },
-          outputPath: downloadsPath,
+          outputPath: outputPath,
           options: {
             extract_files: true,
             flatten_structure: false,
@@ -1826,24 +2018,83 @@ function App() {
           },
         });
 
-        setCommandStatus({ message: result.output_path, type: 'success' });
-        commandStatusTimeoutRef.current = setTimeout(() => {
-          setCommandStatus({ message: "Type a command...", type: 'idle' });
-        }, 1000);
+        showCommandSuccess(result.output_path, result.output_path);
       } catch (e) {
-        setCommandStatus({ message: String(e), type: 'error' });
-        commandStatusTimeoutRef.current = setTimeout(() => {
-          setCommandStatus({ message: "Type a command...", type: 'idle' });
-        }, 1000);
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // === YOUTUBE DOWNLOAD COMMAND ===
+    // "yt <url> [to <destination>]"
+    const ytMatch = normalizedInput.match(/^yt\s+(\S+)(?:\s+to\s+(.+))?$/i);
+    if (ytMatch) {
+      let url = ytMatch[1];
+      const destination = ytMatch[2]?.trim();
+
+      // Handle "clipboard" keyword
+      if (url.toLowerCase() === 'clipboard') {
+        try {
+          const clipboardText = await readText();
+          if (!clipboardText) {
+            showCommandError("Clipboard is empty");
+            return;
+          }
+          url = clipboardText.trim();
+        } catch (e) {
+          showCommandError("Could not read clipboard");
+          return;
+        }
+      }
+
+      // Parse YouTube URL
+      const parsed = parseYouTubeUrl(url);
+      if (!parsed?.isValid) {
+        showCommandError("Invalid YouTube URL");
+        return;
+      }
+
+      // Resolve destination path
+      let outputPath: string;
+      if (destination) {
+        const resolved = await resolveDestination(destination);
+        if (resolved) {
+          outputPath = resolved.path;
+        } else {
+          showCommandError(`Unknown location: ${destination}`);
+          return;
+        }
+      } else {
+        try {
+          outputPath = await invoke<string>("get_downloads_path");
+        } catch (e) {
+          showCommandError("Could not find Downloads folder");
+          return;
+        }
+      }
+
+      // Start download
+      setCommandStatus({ message: "Downloading video...", type: 'progress' });
+
+      try {
+        const result = await invoke<string>("download_youtube_video", {
+          url: url,
+          outputPath: outputPath,
+          options: {
+            quality: 'best',
+            mode: 'video_audio',
+          },
+        });
+
+        showCommandSuccess(result, result);
+      } catch (e) {
+        showCommandError(String(e));
       }
       return;
     }
 
     // Unknown command
-    setCommandStatus({ message: "Unknown command", type: 'error' });
-    commandStatusTimeoutRef.current = setTimeout(() => {
-      setCommandStatus({ message: "Type a command...", type: 'idle' });
-    }, 1000);
+    showCommandError("Unknown command");
   };
 
   // YouTube Downloader handlers - synchronous URL change handler
@@ -2019,6 +2270,7 @@ function App() {
           currencyLoading={currencyLoading}
           commandOnlyMode={settings.command_only_mode}
           commandStatus={commandStatus}
+          calcResult={calcResult}
           onToolExecute={executeTool}
           onKeyDown={handleKeyDown}
           onOpenSettings={() => setShowSettings(true)}
