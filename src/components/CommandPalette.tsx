@@ -12,7 +12,7 @@ import type { Tool, QuickResult } from "../types";
 
 export interface CommandStatus {
   message: string;
-  type: 'idle' | 'progress' | 'success' | 'error' | 'help';
+  type: 'idle' | 'progress' | 'success' | 'error' | 'help' | 'timer';
 }
 
 interface CommandPaletteProps {
@@ -26,6 +26,8 @@ interface CommandPaletteProps {
   commandOnlyMode: boolean;
   commandStatus: CommandStatus;
   calcResult: string | null;
+  timerRemaining: number | null;
+  timerLabel: string;
   onToolExecute: (tool: Tool) => Promise<void>;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onOpenSettings: () => void;
@@ -45,6 +47,8 @@ export function CommandPalette({
   commandOnlyMode,
   commandStatus,
   calcResult,
+  timerRemaining,
+  timerLabel,
   onToolExecute,
   onKeyDown,
   onOpenSettings,
@@ -57,6 +61,18 @@ export function CommandPalette({
   const [copied, setCopied] = useState(false);
   const textMeasureRef = useRef<HTMLSpanElement>(null);
   const [inputTextWidth, setInputTextWidth] = useState(0);
+
+  // Format timer display as MM:SS or HH:MM:SS
+  const formatTimerDisplay = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   // Measure input text width for calculator result positioning
   useEffect(() => {
@@ -76,6 +92,11 @@ export function CommandPalette({
   const getCommandPlaceholder = () => {
     if (!commandOnlyMode) return status || "Search for tools...";
     if (status) return status;
+    // Show timer countdown when active (timerLabel reserved for future multi-timer support)
+    if (timerRemaining !== null && timerRemaining > 0) {
+      void timerLabel; // Reserved for future use
+      return `⏱ ${formatTimerDisplay(timerRemaining)}`;
+    }
     return commandStatus.message;
   };
 
@@ -86,6 +107,10 @@ export function CommandPalette({
         : "text-buncha-text placeholder-buncha-text-muted";
     }
     if (status) return "text-buncha-accent placeholder-buncha-accent";
+    // Timer active - show blue/cyan color
+    if (timerRemaining !== null && timerRemaining > 0) {
+      return "text-buncha-text placeholder-blue-400";
+    }
     switch (commandStatus.type) {
       case 'success':
         return "text-buncha-text placeholder-green-500";
@@ -93,6 +118,8 @@ export function CommandPalette({
         return "text-buncha-text placeholder-red-500";
       case 'help':
         return "text-buncha-text placeholder-cyan-400";
+      case 'timer':
+        return "text-buncha-text placeholder-blue-400";
       default:
         return "text-buncha-text placeholder-buncha-text-muted";
     }
@@ -112,11 +139,12 @@ export function CommandPalette({
             <Search className="w-5 h-5 text-buncha-text-muted" />
           )}
         </div>
-        <div className="ml-15 relative">
+        <div className="ml-15 flex items-center relative">
           {/* Hidden span to measure text width */}
           <span
             ref={textMeasureRef}
-            className="absolute invisible whitespace-pre text-lg"
+            className="absolute invisible whitespace-pre text-lg pointer-events-none"
+            style={{ top: 0, left: 0 }}
             aria-hidden="true"
           >
             {query}

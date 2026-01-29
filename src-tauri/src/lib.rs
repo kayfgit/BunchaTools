@@ -90,6 +90,13 @@ impl Default for Settings {
 }
 
 // Global state for current shortcut
+struct TimerState {
+    active: bool,
+    end_time: Option<std::time::Instant>,
+    duration_secs: u64,
+    label: String,
+}
+
 struct AppState {
     current_shortcut: Mutex<Option<Shortcut>>,
     quick_translation_shortcut: Mutex<Option<Shortcut>>,
@@ -101,6 +108,7 @@ struct AppState {
     git_download_cancelled: Mutex<bool>,
     youtube_download_cancelled: Mutex<bool>,
     youtube_download_process: Mutex<Option<u32>>, // PID of yt-dlp process
+    timer_state: Mutex<TimerState>,
 }
 
 fn get_settings_path(app: &AppHandle) -> PathBuf {
@@ -149,6 +157,36 @@ fn load_path_aliases(app: &AppHandle) -> PathAliases {
 fn save_path_aliases(app: &AppHandle, aliases: &PathAliases) -> Result<(), String> {
     let path = get_aliases_path(app);
     let content = serde_json::to_string_pretty(aliases).map_err(|e| e.to_string())?;
+    fs::write(path, content).map_err(|e| e.to_string())
+}
+
+// Command history persistence
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandHistory {
+    pub commands: Vec<String>,
+}
+
+fn get_history_path(app: &AppHandle) -> PathBuf {
+    let app_data = app.path().app_data_dir().unwrap();
+    fs::create_dir_all(&app_data).unwrap_or_default();
+    app_data.join("command_history.json")
+}
+
+fn load_command_history_from_file(app: &AppHandle) -> CommandHistory {
+    let path = get_history_path(app);
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(history) = serde_json::from_str(&content) {
+                return history;
+            }
+        }
+    }
+    CommandHistory::default()
+}
+
+fn save_command_history_to_file(app: &AppHandle, history: &CommandHistory) -> Result<(), String> {
+    let path = get_history_path(app);
+    let content = serde_json::to_string_pretty(history).map_err(|e| e.to_string())?;
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
@@ -1904,6 +1942,298 @@ fn is_valid_path(path: String) -> bool {
     path_buf.is_absolute() || path.contains('\\') || path.contains('/')
 }
 
+/// Load command history from disk
+#[tauri::command]
+fn load_command_history(app: AppHandle) -> Vec<String> {
+    load_command_history_from_file(&app).commands
+}
+
+/// Save command history to disk
+#[tauri::command]
+fn save_command_history(app: AppHandle, commands: Vec<String>) -> Result<(), String> {
+    let history = CommandHistory { commands };
+    save_command_history_to_file(&app, &history)
+}
+
+// App Launcher Command
+#[tauri::command]
+async fn launch_app(app_name: String) -> Result<String, String> {
+    let name_lower = app_name.to_lowercase();
+
+    // Map common app names to executable names
+    let executable = match name_lower.as_str() {
+        // Browsers
+        "chrome" | "google chrome" => {
+            #[cfg(target_os = "windows")]
+            { "chrome" }
+            #[cfg(target_os = "linux")]
+            { "google-chrome" }
+            #[cfg(target_os = "macos")]
+            { "Google Chrome" }
+        }
+        "firefox" => "firefox",
+        "edge" | "microsoft edge" => {
+            #[cfg(target_os = "windows")]
+            { "msedge" }
+            #[cfg(not(target_os = "windows"))]
+            { "microsoft-edge" }
+        }
+        "brave" => {
+            #[cfg(target_os = "windows")]
+            { "brave" }
+            #[cfg(not(target_os = "windows"))]
+            { "brave-browser" }
+        }
+
+        // Development
+        "code" | "vscode" | "vs code" | "visual studio code" => "code",
+        "cursor" => "cursor",
+        "notepad" => "notepad",
+        "notepad++" | "notepadplusplus" => "notepad++",
+        "sublime" | "sublime text" => {
+            #[cfg(target_os = "windows")]
+            { "subl" }
+            #[cfg(not(target_os = "windows"))]
+            { "subl" }
+        }
+
+        // Terminal
+        "terminal" | "cmd" | "command prompt" => {
+            #[cfg(target_os = "windows")]
+            { "cmd" }
+            #[cfg(target_os = "linux")]
+            { "x-terminal-emulator" }
+            #[cfg(target_os = "macos")]
+            { "Terminal" }
+        }
+        "powershell" => "powershell",
+        "wt" | "windows terminal" => "wt",
+
+        // File managers
+        "explorer" | "file explorer" | "files" => {
+            #[cfg(target_os = "windows")]
+            { "explorer" }
+            #[cfg(target_os = "linux")]
+            { "nautilus" }
+            #[cfg(target_os = "macos")]
+            { "Finder" }
+        }
+
+        // Communication
+        "discord" => "discord",
+        "slack" => "slack",
+        "teams" | "microsoft teams" => "teams",
+        "zoom" => "zoom",
+
+        // Media
+        "spotify" => "spotify",
+        "vlc" => "vlc",
+
+        // Productivity
+        "word" | "microsoft word" => "winword",
+        "excel" | "microsoft excel" => "excel",
+        "powerpoint" | "microsoft powerpoint" => "powerpnt",
+        "outlook" | "microsoft outlook" => "outlook",
+
+        // Other
+        "calculator" | "calc" => {
+            #[cfg(target_os = "windows")]
+            { "calc" }
+            #[cfg(target_os = "linux")]
+            { "gnome-calculator" }
+            #[cfg(target_os = "macos")]
+            { "Calculator" }
+        }
+        "paint" => "mspaint",
+        "obs" | "obs studio" => "obs64",
+        "figma" => "figma",
+        "postman" => "postman",
+        "docker" | "docker desktop" => "docker",
+        "git bash" => "git-bash",
+
+        // If not in the mapping, try the name directly
+        _ => &app_name,
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, use cmd /c start to handle both PATH apps and Start Menu apps
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", executable])
+            .spawn()
+            .map_err(|e| format!("Failed to launch '{}': {}", app_name, e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-a", executable])
+            .spawn()
+            .map_err(|e| format!("Failed to launch '{}': {}", app_name, e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try direct execution first, fall back to xdg-open
+        if std::process::Command::new(executable)
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("xdg-open")
+                .arg(executable)
+                .spawn()
+                .map_err(|e| format!("Failed to launch '{}': {}", app_name, e))?;
+        }
+    }
+
+    Ok(app_name)
+}
+
+// Clipboard Commands
+#[tauri::command]
+async fn read_clipboard(app: AppHandle) -> Result<String, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    app.clipboard()
+        .read_text()
+        .map_err(|e| format!("Failed to read clipboard: {}", e))
+}
+
+#[tauri::command]
+async fn write_clipboard(app: AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    app.clipboard()
+        .write_text(&text)
+        .map_err(|e| format!("Failed to write to clipboard: {}", e))
+}
+
+// Timer Commands
+#[derive(Clone, Serialize)]
+struct TimerTick {
+    remaining: u64,
+    label: String,
+}
+
+#[tauri::command]
+async fn start_timer(app: AppHandle, seconds: u64, label: Option<String>) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    let state = app.state::<AppState>();
+
+    // Check if timer is already active
+    {
+        let timer = state.timer_state.lock().unwrap();
+        if timer.active {
+            return Err("A timer is already running. Cancel it first.".to_string());
+        }
+    }
+
+    // Set timer state
+    let timer_label = label.unwrap_or_else(|| "Timer".to_string());
+    {
+        let mut timer = state.timer_state.lock().unwrap();
+        timer.active = true;
+        timer.end_time = Some(std::time::Instant::now() + std::time::Duration::from_secs(seconds));
+        timer.duration_secs = seconds;
+        timer.label = timer_label.clone();
+    }
+
+    // Spawn async task to emit tick events and send notification
+    let app_handle = app.clone();
+    let label_clone = timer_label.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let mut remaining = seconds;
+
+        while remaining > 0 {
+            // Check if cancelled
+            {
+                let state = app_handle.state::<AppState>();
+                let timer = state.timer_state.lock().unwrap();
+                if !timer.active {
+                    return; // Timer was cancelled
+                }
+            }
+
+            // Emit tick event
+            let _ = app_handle.emit("timer-tick", TimerTick {
+                remaining,
+                label: label_clone.clone(),
+            });
+
+            // Wait 1 second
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            remaining = remaining.saturating_sub(1);
+        }
+
+        // Timer complete - emit final tick
+        let _ = app_handle.emit("timer-tick", TimerTick {
+            remaining: 0,
+            label: label_clone.clone(),
+        });
+
+        // Send notification
+        let _ = app_handle.notification()
+            .builder()
+            .title("Timer Complete")
+            .body(&format!("{} - Time's up!", label_clone))
+            .show();
+
+        // Reset timer state
+        {
+            let state = app_handle.state::<AppState>();
+            let mut timer = state.timer_state.lock().unwrap();
+            timer.active = false;
+            timer.end_time = None;
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_timer(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut timer = state.timer_state.lock().unwrap();
+
+    if !timer.active {
+        return Err("No timer is currently running.".to_string());
+    }
+
+    timer.active = false;
+    timer.end_time = None;
+
+    // Emit cancelled event
+    let _ = app.emit("timer-tick", TimerTick {
+        remaining: 0,
+        label: "cancelled".to_string(),
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_timer_remaining(app: AppHandle) -> Result<Option<u64>, String> {
+    let state = app.state::<AppState>();
+    let timer = state.timer_state.lock().unwrap();
+
+    if !timer.active {
+        return Ok(None);
+    }
+
+    if let Some(end_time) = timer.end_time {
+        let now = std::time::Instant::now();
+        if now >= end_time {
+            Ok(Some(0))
+        } else {
+            Ok(Some((end_time - now).as_secs()))
+        }
+    } else {
+        Ok(None)
+    }
+}
+
 #[tauri::command]
 async fn open_folder_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -2318,6 +2648,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             current_shortcut: Mutex::new(None),
             quick_translation_shortcut: Mutex::new(None),
@@ -2329,6 +2660,12 @@ pub fn run() {
             git_download_cancelled: Mutex::new(false),
             youtube_download_cancelled: Mutex::new(false),
             youtube_download_process: Mutex::new(None),
+            timer_state: Mutex::new(TimerState {
+                active: false,
+                end_time: None,
+                duration_secs: 0,
+                label: String::new(),
+            }),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -2502,10 +2839,18 @@ pub fn run() {
             learn_path_alias,
             resolve_path_alias,
             is_valid_path,
+            load_command_history,
+            save_command_history,
             open_folder_in_explorer,
             get_youtube_video_info,
             download_youtube_video,
-            cancel_youtube_download
+            cancel_youtube_download,
+            launch_app,
+            read_clipboard,
+            write_clipboard,
+            start_timer,
+            cancel_timer,
+            get_timer_remaining
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

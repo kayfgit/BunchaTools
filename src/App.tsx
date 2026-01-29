@@ -214,8 +214,11 @@ function App() {
   });
   const commandStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const historyLoadedRef = useRef(false);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [lastResultPath, setLastResultPath] = useState<string | null>(null);
+  const [timerRemaining, setTimerRemaining] = useState<number | null>(null);
+  const [timerLabel, setTimerLabel] = useState<string>("");
 
   // Define tools
   const tools: Tool[] = [
@@ -399,7 +402,7 @@ function App() {
     },
   ];
 
-  // Load settings on mount and mark app as ready
+  // Load settings and command history on mount, and mark app as ready
   useEffect(() => {
     const initialize = async () => {
       try {
@@ -409,6 +412,12 @@ function App() {
         setTimeout(() => {
           settingsInitialized.current = true;
         }, 0);
+
+        // Load command history
+        const history = await invoke<string[]>("load_command_history");
+        setCommandHistory(history);
+        historyLoadedRef.current = true;
+
         // Signal to backend that the app is fully loaded and ready
         await invoke("mark_app_ready");
       } catch (e) {
@@ -432,6 +441,22 @@ function App() {
 
     return () => clearTimeout(timeoutId);
   }, [settings]);
+
+  // Auto-save command history when it changes
+  useEffect(() => {
+    // Don't save until history has been loaded (avoid overwriting with empty array on init)
+    if (!historyLoadedRef.current) return;
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        await invoke("save_command_history", { commands: commandHistory });
+      } catch (e) {
+        console.error("Failed to save command history:", e);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [commandHistory]);
 
   // Generate QR code when data changes
   useEffect(() => {
@@ -537,6 +562,37 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, [settings.command_only_mode]);
+
+  // Listen for timer tick events
+  useEffect(() => {
+    const unlisten = listen<{ remaining: number; label: string }>("timer-tick", (event) => {
+      const { remaining, label } = event.payload;
+
+      if (label === "cancelled" || remaining === 0) {
+        // Timer completed or cancelled
+        setTimerRemaining(null);
+        setTimerLabel("");
+        if (remaining === 0 && label !== "cancelled") {
+          // Timer completed - show success briefly
+          setCommandStatus({
+            message: `${label} complete!`,
+            type: 'success',
+          });
+          // Auto-dismiss after 3 seconds
+          setTimeout(() => {
+            setCommandStatus({ message: "Type a command...", type: 'idle' });
+          }, 3000);
+        }
+      } else {
+        setTimerRemaining(remaining);
+        setTimerLabel(label);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   // Keep ref in sync with git download status
   useEffect(() => {
@@ -913,10 +969,20 @@ function App() {
   }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showQRCustomization, showRegexTester, showGitDownloader, showYouTubeDownloader, isCommandOnlyCollapsed]);
 
   // Auto-resize window based on content
-  const { contentRef } = useWindowAutoSize<HTMLDivElement>({
+  const { contentRef, measureAndResize } = useWindowAutoSize<HTMLDivElement>({
     config: windowSizeConfig,
     enabled: true,
   });
+
+  // Force window resize when switching between views
+  // This handles cases where the content changes but config values are similar
+  useEffect(() => {
+    // Give React time to re-render the new view
+    const timeout = setTimeout(() => {
+      measureAndResize();
+    }, 50);
+    return () => clearTimeout(timeout);
+  }, [showSettings, settings.command_only_mode, measureAndResize]);
 
   const executeTool = async (tool: Tool) => {
     if (tool.isSettings) {
@@ -1238,6 +1304,29 @@ function App() {
         return;
       }
 
+      // In command-only mode, cancel downloads in progress
+      if (settings.command_only_mode && commandStatus.type === 'progress') {
+        // Cancel any ongoing downloads
+        try {
+          await invoke("cancel_git_download");
+        } catch {
+          // Ignore - may not be a git download
+        }
+        try {
+          await invoke("cancel_youtube_download");
+        } catch {
+          // Ignore - may not be a youtube download
+        }
+        setCommandStatus({ message: "Cancelled", type: 'error' });
+        if (commandStatusTimeoutRef.current) {
+          clearTimeout(commandStatusTimeoutRef.current);
+        }
+        commandStatusTimeoutRef.current = setTimeout(() => {
+          setCommandStatus({ message: "Type a command...", type: 'idle' });
+        }, 1500);
+        return;
+      }
+
       // Close panels in order of priority (most specific first)
       if (showVideoConverter) {
         setShowVideoConverter(false);
@@ -1321,7 +1410,7 @@ function App() {
 
     window.addEventListener("keydown", handleGlobalEscape);
     return () => window.removeEventListener("keydown", handleGlobalEscape);
-  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, showYouTubeDownloader, gitProgress.stage, ytProgress.stage, isRecordingHotkey, isRecordingQuickTranslationHotkey]);
+  }, [showVideoConverter, showPortKiller, showTranslation, showSettings, showColorPicker, showQRGenerator, showRegexTester, showGitDownloader, showYouTubeDownloader, gitProgress.stage, ytProgress.stage, isRecordingHotkey, isRecordingQuickTranslationHotkey, settings.command_only_mode, commandStatus.type]);
 
   // Color picker blur handler
   useEffect(() => {
@@ -1855,6 +1944,60 @@ function App() {
     return null;
   };
 
+  // Parse time duration strings like "5m", "30 seconds", "1h30m", "90"
+  const parseTimeDuration = (input: string): number | null => {
+    const normalized = input.toLowerCase().trim();
+
+    // Try parsing compound durations like "1h30m" or "1 hour 30 minutes"
+    let totalSeconds = 0;
+    let matched = false;
+
+    // Pattern for hours
+    const hoursMatch = normalized.match(/(\d+)\s*(?:h|hour|hours)/);
+    if (hoursMatch) {
+      totalSeconds += parseInt(hoursMatch[1], 10) * 3600;
+      matched = true;
+    }
+
+    // Pattern for minutes
+    const minutesMatch = normalized.match(/(\d+)\s*(?:m|min|mins|minute|minutes)/);
+    if (minutesMatch) {
+      totalSeconds += parseInt(minutesMatch[1], 10) * 60;
+      matched = true;
+    }
+
+    // Pattern for seconds
+    const secondsMatch = normalized.match(/(\d+)\s*(?:s|sec|secs|second|seconds)/);
+    if (secondsMatch) {
+      totalSeconds += parseInt(secondsMatch[1], 10);
+      matched = true;
+    }
+
+    if (matched) {
+      return totalSeconds > 0 ? totalSeconds : null;
+    }
+
+    // Try bare number (treat as seconds)
+    const bareNumber = parseInt(normalized, 10);
+    if (!isNaN(bareNumber) && bareNumber > 0) {
+      return bareNumber;
+    }
+
+    return null;
+  };
+
+  // Format seconds as MM:SS or HH:MM:SS
+  const formatTimerDisplay = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   // Command-only mode: Helper to show error and reset
   const showCommandError = (message: string) => {
     setCommandStatus({ message, type: 'error' });
@@ -1901,7 +2044,7 @@ function App() {
     // === HELP COMMAND ===
     if (normalizedInput.match(/^(help|\?)$/i)) {
       setCommandStatus({
-        message: "dl <url> [to <dest>] | yt <url> [to <dest>] | open [<path>] | ? for help",
+        message: "dl | open | scan | kill | launch | copy | clipboard | timer",
         type: 'help',
       });
       // Help doesn't auto-dismiss - user types to clear
@@ -1944,8 +2087,9 @@ function App() {
       return;
     }
 
-    // === DOWNLOAD COMMAND (GitHub) ===
+    // === DOWNLOAD COMMAND ===
     // "download <url> [to <destination>]" or "download clipboard [to <destination>]"
+    // Auto-detects URL type: GitHub, YouTube, etc.
     const downloadMatch = normalizedInput.match(/^download\s+(\S+)(?:\s+to\s+(.+))?$/i);
     if (downloadMatch) {
       let url = downloadMatch[1];
@@ -1966,21 +2110,7 @@ function App() {
         }
       }
 
-      // Check if it's a GitHub URL
-      const parsed = parseGitHubUrl(url);
-      if (!parsed || !parsed.isValid) {
-        // Maybe it's a YouTube URL? Redirect to yt command
-        const ytParsed = parseYouTubeUrl(url);
-        if (ytParsed?.isValid) {
-          // Redirect to YouTube download
-          await executeCommand(`yt ${url}${destination ? ` to ${destination}` : ''}`);
-          return;
-        }
-        showCommandError("Invalid GitHub URL");
-        return;
-      }
-
-      // Resolve destination path
+      // Resolve destination path first (common for all download types)
       let outputPath: string;
       if (destination) {
         const resolved = await resolveDestination(destination);
@@ -1999,94 +2129,222 @@ function App() {
         }
       }
 
-      // Start download
-      setCommandStatus({ message: "Downloading... 0%", type: 'progress' });
+      // Try to detect URL type and download accordingly
+
+      // Check if it's a YouTube URL
+      const ytParsed = parseYouTubeUrl(url);
+      if (ytParsed?.isValid) {
+        setCommandStatus({ message: "Downloading video...", type: 'progress' });
+        try {
+          const result = await invoke<string>("download_youtube_video", {
+            url: url,
+            outputPath: outputPath,
+            options: {
+              quality: 'best',
+              mode: 'video_audio',
+            },
+          });
+          showCommandSuccess(result, result);
+        } catch (e) {
+          showCommandError(String(e));
+        }
+        return;
+      }
+
+      // Check if it's a GitHub URL
+      const gitParsed = parseGitHubUrl(url);
+      if (gitParsed?.isValid) {
+        setCommandStatus({ message: "Downloading... 0%", type: 'progress' });
+        try {
+          const result = await invoke<GitDownloadResult>("download_github_folder", {
+            urlInfo: {
+              owner: gitParsed.owner,
+              repo: gitParsed.repo,
+              branch: gitParsed.branch,
+              path: gitParsed.path,
+            },
+            outputPath: outputPath,
+            options: {
+              extract_files: true,
+              flatten_structure: false,
+              create_subfolder: true,
+            },
+          });
+          showCommandSuccess(result.output_path, result.output_path);
+        } catch (e) {
+          showCommandError(String(e));
+        }
+        return;
+      }
+
+      // TODO: Add TikTok and other URL type detection here
+
+      // Unknown URL type
+      showCommandError("Unsupported URL type");
+      return;
+    }
+
+    // === SCAN COMMAND ===
+    // "scan <port>" - scan for processes using a port
+    const scanMatch = normalizedInput.match(/^scan\s+(\d+)$/i);
+    if (scanMatch) {
+      const port = parseInt(scanMatch[1], 10);
+
+      if (isNaN(port) || port <= 0 || port > 65535) {
+        showCommandError("Invalid port number (1-65535)");
+        return;
+      }
+
+      setCommandStatus({ message: "Scanning...", type: 'progress' });
 
       try {
-        const result = await invoke<GitDownloadResult>("download_github_folder", {
-          urlInfo: {
-            owner: parsed.owner,
-            repo: parsed.repo,
-            branch: parsed.branch,
-            path: parsed.path,
-          },
-          outputPath: outputPath,
-          options: {
-            extract_files: true,
-            flatten_structure: false,
-            create_subfolder: true,
-          },
-        });
+        const processes = await invoke<PortProcess[]>("scan_port", { port });
 
-        showCommandSuccess(result.output_path, result.output_path);
+        if (processes.length === 0) {
+          showCommandError(`Port ${port} is free`);
+        } else if (processes.length === 1) {
+          const p = processes[0];
+          showCommandSuccess(`${p.name} (PID ${p.pid}) ${p.protocol}`);
+        } else {
+          // Multiple processes found
+          const names = [...new Set(processes.map(p => p.name))].join(', ');
+          showCommandSuccess(`${processes.length} processes: ${names}`);
+        }
       } catch (e) {
         showCommandError(String(e));
       }
       return;
     }
 
-    // === YOUTUBE DOWNLOAD COMMAND ===
-    // "yt <url> [to <destination>]"
-    const ytMatch = normalizedInput.match(/^yt\s+(\S+)(?:\s+to\s+(.+))?$/i);
-    if (ytMatch) {
-      let url = ytMatch[1];
-      const destination = ytMatch[2]?.trim();
+    // === KILL COMMAND ===
+    // "kill <port>" - kills the process using that port
+    const killMatch = normalizedInput.match(/^kill\s+(\d+)$/i);
+    if (killMatch) {
+      const port = parseInt(killMatch[1], 10);
 
-      // Handle "clipboard" keyword
-      if (url.toLowerCase() === 'clipboard') {
-        try {
-          const clipboardText = await readText();
-          if (!clipboardText) {
-            showCommandError("Clipboard is empty");
-            return;
-          }
-          url = clipboardText.trim();
-        } catch (e) {
-          showCommandError("Could not read clipboard");
-          return;
-        }
-      }
-
-      // Parse YouTube URL
-      const parsed = parseYouTubeUrl(url);
-      if (!parsed?.isValid) {
-        showCommandError("Invalid YouTube URL");
+      if (isNaN(port) || port <= 0 || port > 65535) {
+        showCommandError("Invalid port number");
         return;
       }
 
-      // Resolve destination path
-      let outputPath: string;
-      if (destination) {
-        const resolved = await resolveDestination(destination);
-        if (resolved) {
-          outputPath = resolved.path;
-        } else {
-          showCommandError(`Unknown location: ${destination}`);
-          return;
-        }
-      } else {
-        try {
-          outputPath = await invoke<string>("get_downloads_path");
-        } catch (e) {
-          showCommandError("Could not find Downloads folder");
-          return;
-        }
-      }
-
-      // Start download
-      setCommandStatus({ message: "Downloading video...", type: 'progress' });
+      setCommandStatus({ message: "Finding process...", type: 'progress' });
 
       try {
-        const result = await invoke<string>("download_youtube_video", {
-          url: url,
-          outputPath: outputPath,
-          options: {
-            quality: 'best',
-            mode: 'video_audio',
-          },
-        });
+        // First scan to find the PID
+        const processes = await invoke<PortProcess[]>("scan_port", { port });
 
-        showCommandSuccess(result, result);
+        if (processes.length === 0) {
+          showCommandError(`No process on port ${port}`);
+          return;
+        }
+
+        // Kill all processes on this port
+        for (const p of processes) {
+          await invoke("kill_port_process", { pid: p.pid });
+        }
+
+        if (processes.length === 1) {
+          showCommandSuccess(`Killed ${processes[0].name} (PID ${processes[0].pid})`);
+        } else {
+          showCommandSuccess(`Killed ${processes.length} processes on port ${port}`);
+        }
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // === LAUNCH/RUN/START COMMAND ===
+    // "launch <app>", "run <app>", "start <app>" - launch an application
+    const launchMatch = normalizedInput.match(/^(?:launch|run|start)\s+(.+)$/i);
+    if (launchMatch) {
+      const appName = launchMatch[1].trim();
+
+      if (!appName) {
+        showCommandError("Specify an app name");
+        return;
+      }
+
+      setCommandStatus({ message: `Launching ${appName}...`, type: 'progress' });
+
+      try {
+        await invoke("launch_app", { appName });
+        showCommandSuccess(`Launched ${appName}`);
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // === CLIPBOARD COMMANDS ===
+    // "copy: <text>" or "copy this: <text>" - write text to clipboard
+    const copyMatch = normalizedInput.match(/^copy(?:\s+this)?[:\s]+(.+)$/i);
+    if (copyMatch) {
+      const textToCopy = copyMatch[1].trim();
+
+      if (!textToCopy) {
+        showCommandError("Specify text to copy");
+        return;
+      }
+
+      try {
+        await invoke("write_clipboard", { text: textToCopy });
+        showCommandSuccess("Copied to clipboard");
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // "clipboard", "show clipboard", "what's in clipboard", "paste" - read clipboard
+    const clipboardMatch = normalizedInput.match(/^(?:clipboard|show\s+clipboard|what'?s?\s+in\s+(?:my\s+)?clipboard|paste)$/i);
+    if (clipboardMatch) {
+      try {
+        const content = await invoke<string>("read_clipboard");
+        if (!content || content.trim() === "") {
+          showCommandError("Clipboard is empty");
+        } else {
+          // Truncate long content for display
+          const displayContent = content.length > 50 ? content.substring(0, 47) + "..." : content;
+          showCommandSuccess(displayContent);
+        }
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // === TIMER COMMANDS ===
+    // "timer <duration>" - start a timer
+    const timerMatch = normalizedInput.match(/^timer\s+(.+)$/i);
+    if (timerMatch) {
+      const durationStr = timerMatch[1].trim();
+      const seconds = parseTimeDuration(durationStr);
+
+      if (!seconds) {
+        showCommandError("Invalid duration (e.g., 5m, 30s, 1h30m)");
+        return;
+      }
+
+      try {
+        await invoke("start_timer", { seconds, label: `Timer ${formatTimerDisplay(seconds)}` });
+        setTimerRemaining(seconds);
+        setTimerLabel(`Timer ${formatTimerDisplay(seconds)}`);
+        showCommandSuccess(`Timer set for ${formatTimerDisplay(seconds)}`);
+      } catch (e) {
+        showCommandError(String(e));
+      }
+      return;
+    }
+
+    // "cancel timer", "stop timer" - cancel the running timer
+    const cancelTimerMatch = normalizedInput.match(/^(?:cancel|stop)\s+timer$/i);
+    if (cancelTimerMatch) {
+      try {
+        await invoke("cancel_timer");
+        setTimerRemaining(null);
+        setTimerLabel("");
+        showCommandSuccess("Timer cancelled");
       } catch (e) {
         showCommandError(String(e));
       }
@@ -2271,6 +2529,8 @@ function App() {
           commandOnlyMode={settings.command_only_mode}
           commandStatus={commandStatus}
           calcResult={calcResult}
+          timerRemaining={timerRemaining}
+          timerLabel={timerLabel}
           onToolExecute={executeTool}
           onKeyDown={handleKeyDown}
           onOpenSettings={() => setShowSettings(true)}
